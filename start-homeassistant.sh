@@ -1,22 +1,18 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# Launcher with Hardware Access (Root required)
 
-TERMUX_HOME="/data/data/com.termux/files/home"
+# נתיב מלא לפקודות של טרמוקס כדי שה-Root יזהה אותן
+T_PATH="/data/data/com.termux/files/usr/bin"
 
-# בקשת הרשאות Root וביטול חיסכון בסוללה
-tsu -c "termux-wake-lock"
-tsu -c "cmd battery-optimization disable com.termux"
+echo "[*] Initializing Root Environment..."
+# הפעלת Wake Lock והחרגת סוללה
+su -c "$T_PATH/termux-wake-lock"
+su -c "cmd deviceidle whitelist +com.termux"
 
-# זיהוי IP
-PHONE_IP=$(ip addr show wlan0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d/ -f1)
+echo "[*] Starting Home Assistant Core (Root Mode)..."
+echo "URL: http://192.168.1.119:8123"
 
-echo "-----------------------------------------------------"
-echo "  Starting Home Assistant Core (Root Mode)"
-echo "  URL: http://${PHONE_IP:-localhost}:8123"
-echo "-----------------------------------------------------"
+# הפעלת שירותי המערכת בתוך אובונטו
+su -c "$T_PATH/proot-distro login ubuntu --bind /dev:/dev -- service dbus start > /dev/null 2>&1"
 
-# הפעלת D-Bus עבור Bluetooth
-tsu -c "proot-distro login ubuntu --bind /dev:/dev -- service dbus start > /dev/null 2>&1"
-
-# הרצה עם גישה מלאה לחומרה (/dev)
-tsu -c "proot-distro login ubuntu --bind /dev:/dev --bind /sys:/sys -- $TERMUX_HOME/hass-venv/bin/hass -c $TERMUX_HOME/hass-config"
+# הפעלת השרת עצמו עם נתיבים מלאים
+su -c "$T_PATH/proot-distro login ubuntu --bind /dev:/dev --bind /sys:/sys -- /data/data/com.termux/files/home/hass-venv/bin/hass -c /data/data/com.termux/files/home/hass-config"
