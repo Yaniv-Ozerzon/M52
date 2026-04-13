@@ -148,3 +148,173 @@ proot-distro install ubuntu
 ```
 
 ואמשיך איתך צעד-צעד.
+
+
+
+כן — אפשר לגרום ל-OpenClaw לעלות אוטומטית עם הדלקת המכשיר, אבל באנדרואיד זה דורש **פתרון עקיף** (כי Android לא מריץ שירותי Linux רגילים כמו systemd).
+
+הפתרון היציב ביותר הוא:
+
+**Termux + Termux:Boot + Script אוטומטי**
+
+זה עובד מצוין גם על **Galaxy S10 Lite**.
+
+---
+
+# שלב 1 — התקנת Termux:Boot
+
+חשוב: גם זה **רק מ-F-Droid**
+
+התקן:
+
+👉 [https://f-droid.org/packages/com.termux.boot/](https://f-droid.org/packages/com.termux.boot/)
+
+לאחר ההתקנה:
+
+פתח את האפליקציה **Termux:Boot פעם אחת בלבד**
+(זה נותן לה הרשאות)
+
+---
+
+# שלב 2 — יצירת תיקיית boot
+
+פתח Termux והרץ:
+
+```bash
+mkdir -p ~/.termux/boot
+```
+
+---
+
+# שלב 3 — יצירת Script אוטומטי
+
+צור קובץ:
+
+```bash
+nano ~/.termux/boot/start-openclaw.sh
+```
+
+הדבק בפנים:
+
+```bash
+#!/data/data/com.termux/files/usr/bin/bash
+
+termux-wake-lock
+
+proot-distro login ubuntu -- bash -c "
+cd ~
+tmux new -d -s openclaw 'openclaw gateway'
+"
+```
+
+שמור:
+
+CTRL + X
+Y
+Enter
+
+---
+
+# שלב 4 — הפוך את הקובץ להרצה
+
+```bash
+chmod +x ~/.termux/boot/start-openclaw.sh
+```
+
+---
+
+# שלב 5 — חשוב מאוד (הרשאות אנדרואיד)
+
+לך להגדרות Android:
+
+Settings → Apps → Termux → Battery →
+בחר:
+
+**Unrestricted / Don't optimize**
+
+אותו דבר גם עבור:
+
+* Termux
+* Termux:Boot
+
+זה קריטי כדי שה-OpenClaw לא ייסגר.
+
+---
+
+# עכשיו מה יקרה
+
+כאשר:
+
+* מדליקים את הטלפון
+* Android עולה
+* Termux:Boot מופעל
+* Ubuntu עולה
+* OpenClaw gateway מתחיל
+
+הכול אוטומטי 🚀
+
+---
+
+# בדיקה
+
+הפעל מחדש את המכשיר.
+
+לאחר עלייה:
+
+פתח Termux והרץ:
+
+```bash
+tmux ls
+```
+
+אתה אמור לראות:
+
+```
+openclaw
+```
+
+---
+
+# טיפ נוסף (מומלץ מאוד)
+
+אם אתה רוצה OpenClaw ממש "שרת קבוע":
+
+הוסף גם:
+
+```bash
+pkg install tmux -y
+```
+
+זה מונע קריסות.
+
+---
+
+# חשוב לדעת
+
+OpenClaw אוטומטי על טלפון:
+
+יתרונות:
+
+* AI Agent תמיד זמין
+* אוטומציות 24/7
+* חיסכון במשאבים (לעומת מחשב)
+
+חסרונות:
+
+* צריכת סוללה קטנה
+* Android לפעמים סוגר תהליכים
+
+Galaxy S10 Lite מספיק חזק לזה 👍
+
+---
+
+שאלה חשובה כדי לכוון אותך נכון:
+
+איך אתה מתכנן להשתמש ב-OpenClaw אוטומטי?
+
+* Assistant אישי
+* Agent אוטומציה
+* Coding agent
+* Business agent
+
+אני יכול לעזור גם לבנות את ההגדרות האידיאליות.
