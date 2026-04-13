@@ -23,30 +23,32 @@ Open Termux once and wait 30 seconds.
 Step 2 — Update Termux
 
 Run:
-
+```
 pkg update && pkg upgrade -y
+
+```
 Step 3 — Install Dependencies
 
 Run:
-
+```
 pkg install -y git nodejs python tmux curl wget nano openssh
-
+```
 This installs everything needed.
 
 Step 4 — Install OpenClaw
 
 Run:
-
+```
 npm install -g openclaw
-
+```
 This takes 1–2 minutes.
 
 Step 5 — Start OpenClaw Setup
 
 Run:
-
+```
 openclaw onboard
-
+```
 You will see questions:
 
 Choose:
@@ -73,18 +75,18 @@ Paste into Termux
 Step 7 — Start OpenClaw
 
 Run:
-
+```
 openclaw gateway
-
+```
 Then:
 
 openclaw dashboard
 Step 8 — Keep It Running (Important for Phone)
 
 Run:
-
+```
 termux-wake-lock
-
+```
 This prevents Android from killing it.
 
 Step 9 — Optional (Recommended)
@@ -96,9 +98,9 @@ Start tmux:
 tmux
 
 Then run:
-
+```
 openclaw gateway
-
+```
 Now you can close Termux and it keeps running.
 
 What You Can Now Do
