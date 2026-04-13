@@ -157,3 +157,134 @@ Business assistant
 Experimenting
 
 Tell me — I'll help configure best setup for your use case.
+
+
+
+
+
+
+You're very close — this is a **common Termux issue**.
+Two things are happening:
+
+1. **Broken packages**
+2. **Node/npm not installed properly**
+
+Let's fix it cleanly.
+
+Follow **exactly these steps**:
+
+---
+
+# Step 1 — Fix Broken Packages
+
+Run:
+
+```bash
+pkg update --fix-missing
+```
+
+Then:
+
+```bash
+pkg upgrade -y
+```
+
+If it asks anything → press **Y**
+
+---
+
+# Step 2 — Install NodeJS (this also installs npm)
+
+Run:
+
+```bash
+pkg install nodejs -y
+```
+
+Wait until it completes.
+
+---
+
+# Step 3 — Verify Installation
+
+Run:
+
+```bash
+node -v
+```
+
+Then:
+
+```bash
+npm -v
+```
+
+You should see version numbers like:
+
+```
+v20.x.x
+10.x.x
+```
+
+If yes — you're good.
+
+---
+
+# Step 4 — Now Install OpenClaw
+
+Run:
+
+```bash
+npm install -g openclaw
+```
+
+---
+
+# If You Still Get Errors (Alternative Fix — Very Reliable)
+
+Run:
+
+```bash
+pkg install nodejs-lts -y
+```
+
+Then:
+
+```bash
+npm install -g openclaw
+```
+
+---
+
+# One More Important Step (Highly Recommended)
+
+Run:
+
+```bash
+termux-change-repo
+```
+
+Then:
+
+* Select **Main repository**
+* Choose **Mirrors by Grimler** (most stable)
+
+Then run again:
+
+```bash
+pkg update && pkg upgrade -y
+```
+
+---
+
+This usually fixes **90% of Termux install issues**.
+
+---
+
+Tell me what happens after:
+
+```bash
+pkg install nodejs -y
+```
+
+and I'll guide you to the next step.
