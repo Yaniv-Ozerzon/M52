@@ -1,24 +1,27 @@
-מצוין — עכשיו ברור מה קורה.
+אתה צודק — בוא נעשה **סדר ברור, נקי, ולטווח ארוך**.
+אנחנו נלך על **הדרך היציבה ביותר**:
 
-אתה קיבלת:
+**Android → Termux → Ubuntu (proot) → OpenClaw → Auto-Start**
 
-```
-/usr
-```
+זו הדרך הכי אמינה כיום.
 
-זה אומר ש-npm התקין את OpenClaw כאן:
+---
 
-```
-/usr/bin/openclaw
-```
+# מצב נוכחי שלך
 
-אבל כנראה שהקובץ לא נוצר נכון (זה קורה לפעמים עם npm בתוך Ubuntu ב-proot).
+אתה כבר:
 
-נעשה התקנה מחדש בצורה נקייה.
+✅ בתוך Ubuntu
+✅ node/npm מותקן
+❌ openclaw CLI לא עובד
 
-# שלב 1 — התקנה מחדש (מומלץ)
+לכן נבצע **התקנה נקייה לחלוטין**
 
-הרץ:
+---
+
+# שלב 1 — מחיקה נקייה
+
+בתוך Ubuntu הרץ:
 
 ```bash
 npm uninstall -g openclaw
@@ -27,22 +30,67 @@ npm uninstall -g openclaw
 ואז:
 
 ```bash
-npm install -g openclaw --unsafe-perm=true --allow-root
+rm -rf /usr/lib/node_modules/openclaw
 ```
 
-(הפרמטרים האלו חשובים כי אתה root בתוך proot)
+ואז:
+
+```bash
+rm -f /usr/bin/openclaw
+```
 
 ---
 
-# שלב 2 — בדיקה
+# שלב 2 — התקנה יציבה יותר (חשוב מאוד)
 
-הרץ:
+התקן Node יציב (LTS):
+
+```bash
+apt remove nodejs npm -y
+```
+
+ואז:
+
+```bash
+apt install curl -y
+```
+
+ואז:
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+```
+
+ואז:
+
+```bash
+apt install nodejs -y
+```
+
+בדיקה:
+
+```bash
+node -v
+npm -v
+```
+
+---
+
+# שלב 3 — התקנת OpenClaw
+
+עכשיו:
+
+```bash
+npm install -g openclaw
+```
+
+בדיקה:
 
 ```bash
 which openclaw
 ```
 
-אתה אמור לקבל:
+צריך לקבל:
 
 ```
 /usr/bin/openclaw
@@ -50,48 +98,133 @@ which openclaw
 
 ---
 
-# שלב 3 — אם עדיין לא עובד
-
-נסה:
+# שלב 4 — הפעלת OpenClaw
 
 ```bash
-/usr/bin/openclaw onboard
+openclaw onboard
+```
+
+בחר:
+
+* Provider: OpenAI
+* Model: gpt-4o-mini (מומלץ לטלפון)
+
+---
+
+# שלב 5 — הפעלה
+
+```bash
+openclaw gateway
+```
+
+עכשיו OpenClaw עובד.
+
+---
+
+# שלב 6 — הפעלה אוטומטית עם הדלקת המכשיר (לטווח ארוך)
+
+חזור ל-Termux (צא מ-Ubuntu):
+
+```bash
+exit
 ```
 
 ---
 
-# אם עדיין לא עובד (fallback בטוח)
-
-נסה:
+התקן tmux:
 
 ```bash
-npx openclaw onboard
+pkg install tmux -y
 ```
 
 ---
 
-# למה זה קורה
+צור script:
 
-בתוך:
-
-* Android
-* Termux
-* Ubuntu (proot)
-
-npm לפעמים:
-
-* מתקין בלי ליצור binary
-* או יוצר binary בלי הרשאות
-
-זה באג מוכר.
+```bash
+mkdir -p ~/.termux/boot
+```
 
 ---
 
-אגב — אתה מתקדם מצוין.
-זה החלק הכי "קשה" בהתקנה — ומכאן זה נהיה קל.
+צור קובץ:
 
-אחרי שזה יעבוד, נעבור ל:
+```bash
+nano ~/.termux/boot/start-openclaw.sh
+```
 
-* Autostart בעת boot
-* חיסכון בסוללה
-* שימוש עם GPT בצורה אופטימלית
+הדבק:
+
+```bash
+#!/data/data/com.termux/files/usr/bin/bash
+
+termux-wake-lock
+
+proot-distro login ubuntu -- bash -c "
+tmux new -d -s openclaw 'openclaw gateway'
+"
+```
+
+---
+
+שמור:
+
+CTRL + X
+Y
+Enter
+
+---
+
+הרשאות:
+
+```bash
+chmod +x ~/.termux/boot/start-openclaw.sh
+```
+
+---
+
+# שלב 7 — התקנת Termux Boot
+
+התקן:
+
+[https://f-droid.org/packages/com.termux.boot/](https://f-droid.org/packages/com.termux.boot/)
+
+פתח פעם אחת.
+
+---
+
+# עכשיו מה יקרה
+
+כשאתה:
+
+* מדליק את הטלפון
+* Android עולה
+* Termux עולה
+* Ubuntu עולה
+* OpenClaw עולה
+
+אוטומטית 🚀
+
+---
+
+# למה זו הדרך הכי נכונה לטווח ארוך
+
+יתרונות:
+
+✅ יציב
+✅ עובד על Android
+✅ עולה אוטומטית
+✅ לא דורש מחשב
+✅ מתאים ל-Galaxy S10 Lite
+
+---
+
+אתה כמעט שם.
+
+ברגע שתגיע לשלב:
+
+```bash
+openclaw onboard
+```
+
+תגיד לי — ואני אעזור לך לבחור את **הגדרות GPT האידיאליות**.
