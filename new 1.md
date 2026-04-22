@@ -1,146 +1,167 @@
-עכשיו יש לנו תשובה חד־משמעית מהלוגים שלך — וזה לא WebSocket, ולא networking.
+מצוין, זה שלב חשוב. מאחר שאין לך מודול Docker מוכן, עדיף לא להתחיל להוריד קבצים אקראיים מהאינטרנט (יש הרבה מודולים לא יציבים).
 
-## 🔴 הבעיה האמיתית
-
-מהשורה האחרונה בלוג:
-
-```
-ImportError: cannot import name 'where' from 'certifi'
-```
-
-👉 זו שגיאת **Python dependency שבורה**
-👉 ולכן Home Assistant בכלל לא עולה כמו שצריך
-👉 ולכן ה־UI נתקע על “Loading data”
-
-כל מה שראינו קודם (login עובד / לא עובד / 127 מול 192) היה **תסמין בלבד**, לא הסיבה.
+אני אתן לך דרך **יציבה ובטוחה שמתאימה ל־Magisk שלך**, בלי להסתבך.
 
 ---
 
-# ✅ פתרון – שלב אחר שלב (מדויק)
+# 🟢 הדרך הנכונה: Docker דרך Termux + root (ללא מודול)
 
-נעשה תיקון נקי של הספריות.
+זה עובד טוב מאוד על Magisk, בלי תלות במודולים.
 
 ---
 
-## 🔧 שלב 1 – חזור ל-Termux
+# 🔧 שלב־אחר־שלב
+
+## שלב 1 – התקנת חבילות ב־Termux
 
 פתח Termux והריץ:
 
 ```bash
-proot-distro login ubuntu
+pkg update -y
+pkg install -y root-repo
+pkg install -y docker
 ```
 
 ---
 
-## 🔧 שלב 2 – עצור Home Assistant
+## שלב 2 – הפעלת Docker עם root
 
 ```bash
-pkill -f hass
+su
+dockerd &
+```
+
+⏳ חכה 5–10 שניות
+
+---
+
+## שלב 3 – בדיקה
+
+```bash
+docker ps
+```
+
+אם אין שגיאה → ✔ Docker עובד
+
+---
+
+## שלב 4 – יצירת תיקיית Home Assistant
+
+```bash
+mkdir -p /data/homeassistant
 ```
 
 ---
 
-## 🔧 שלב 3 – הפעל את ה-venv
+## שלב 5 – הרצת Home Assistant
 
 ```bash
-source /data/data/com.termux/files/home/hass-venv/bin/activate
-```
-
-אתה אמור לראות `(hass-venv)` בתחילת השורה.
-
----
-
-## 🔧 שלב 4 – תקן את certifi (השלב הקריטי)
-
-הרץ:
-
-```bash
-pip install --upgrade --force-reinstall certifi
+docker run -d \
+  --name homeassistant \
+  --restart unless-stopped \
+  --network host \
+  -v /data/homeassistant:/config \
+  ghcr.io/home-assistant/home-assistant:stable
 ```
 
 ---
 
-## 🔧 שלב 5 – תקן גם requests (תלות קשורה)
+## שלב 6 – כניסה
 
-```bash
-pip install --upgrade --force-reinstall requests
-```
-
----
-
-## 🔧 שלב 6 – עדכון כללי (מומלץ מאוד)
-
-```bash
-pip install --upgrade pip setuptools wheel
-```
-
-ואז:
-
-```bash
-pip install --upgrade homeassistant
-```
-
----
-
-## 🔧 שלב 7 – יציאה מה־venv (לא חובה אבל נקי)
-
-```bash
-deactivate
-```
-
----
-
-## 🔧 שלב 8 – הפעלה מחדש
-
-```bash
-/data/data/com.termux/files/home/hass-venv/bin/hass -c /data/data/com.termux/files/home/hass-config
-```
-
----
-
-## 🌐 שלב 9 – בדיקה
-
-פתח בדפדפן:
+בדפדפן:
 
 ```
 http://127.0.0.1:8123
 ```
 
----
+או:
 
-# 🎯 תוצאה צפויה
-
-אם הכל תקין:
-
-* לא תראה יותר ImportError
-* תגיע למסך login ✔
-* אחרי login → ה־UI ייטען ✔
+```
+http://192.168.1.119:8123
+```
 
 ---
 
-# 🧠 למה זה קרה
+# 🔁 Auto-start (כמו שיש לך עכשיו)
 
-הסביבה שלך (Termux + proot) גורמת לפעמים ל:
+Docker daemon צריך לעלות עם המכשיר.
 
-* התקנה חלקית של pip packages
-* או חוסר תאימות בין גרסאות
+יש שתי אפשרויות:
 
-`certifi` הוא חלק מ־requests → שמשמש את Home Assistant → וכשהוא נשבר, ה־frontend לא נטען.
+## אפשרות פשוטה (Termux:Boot)
+
+אם יש לך Termux:Boot:
+
+```bash
+mkdir -p ~/.termux/boot
+nano ~/.termux/boot/start-docker.sh
+```
+
+הדבק:
+
+```bash
+#!/data/data/com.termux/files/usr/bin/sh
+su -c "dockerd &"
+```
+
+ואז:
+
+```bash
+chmod +x ~/.termux/boot/start-docker.sh
+```
 
 ---
 
-# ⚠️ אם זה עדיין לא עובד
+## אפשרות מתקדמת (Magisk service)
 
-אם אחרי זה עדיין יש בעיה:
-
-👉 תשלח שוב לוג חדש
-
-אבל הפעם:
-
-* זה כבר יהיה לוג “אמיתי”
-* ולא רעש של dependency שבורה
+אפשר גם להפעיל dockerd דרך Magisk (אם תרצה – אגדיר לך)
 
 ---
 
-אם אתה רוצה, אני יכול גם:
-👉 לתקן לך את סקריפט ההתקנה כדי שזה לא יקרה שוב בעתיד
+# ⚠️ חשוב
+
+## אם docker לא מותקן
+
+ייתכן שתקבל:
+
+```id="err"
+command not found: docker
+```
+
+במקרה כזה:
+
+👉 תגיד לי
+ואני אתן לך פתרון מותאם למכשיר שלך (יש כמה וריאציות לפי CPU)
+
+---
+
+# 🧠 סיכום
+
+אתה עובר מ:
+
+❌ proot
+❌ pip
+❌ בעיות הרשאות
+
+ל:
+
+✔ container יציב
+✔ HA “כמו שצריך”
+✔ פחות כאב ראש
+
+---
+
+# 🚀 צעד הבא
+
+נסה עד שלב:
+
+```bash
+docker ps
+```
+
+ותגיד לי:
+
+* עובד ✔
+* או שגיאה ❌
+
+ואני אמשיך איתך עד שזה רץ.
