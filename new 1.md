@@ -1,3 +1,201 @@
+**מצוין! עכשיו יש לי את התשובה המלאה!** הlog המפורט חשף את הבעיה בדיוק. בוא נפרק:
+
+## הבעיה האמיתית
+
+**שורת המפתח:**
+```
+ls: /data/local/mnt/etc/ssh/: No such file or directory
+chroot: can't execute '/bin/su': No such file or directory
+```
+
+זה אומר ש-Linux Deploy ניסה לעשות chroot לתוך `/data/local/mnt/` - **אבל הוא mount את ה-image במקום אחר**!
+
+**שורת מפתח שנייה (מהבדיקה ב-Termux):**
+```
+/data/data/ru.meefik.linuxdeploy/files/~/linux.img
+```
+
+ה-image נמצא ב-path מוזר - **`~/linux.img`** לא הורחב לhome האמיתי, אלא נוצרה תיקייה בשם `~` עם קובץ בתוכה. זה בעיית escape של הסימן `~` בגרסה ישנה של Linux Deploy.
+
+מצד שני, ה-mount target הוא `/data/local/mnt/` - מקום ברירת מחדל ש-Linux Deploy מנסה לעשות chroot אליו, **אבל ה-image לא הותקן שם**.
+
+## למה זה קורה
+
+הגדרת `Installation path: ~/linux.img` (מהצילומים הקודמים שלך) הייתה אמורה להתפרש כ-`/data/data/ru.meefik.linuxdeploy/files/linux.img`, אבל בגלל באג בגרסה - היא יצרה תיקייה בשם `~` ושמה את הקובץ בתוכה.
+
+הקבצים שכן התקינו - חלקם נמצאים בכלל ב:
+```
+/data_mirror/data_ce/null/0/ru.meefik.linuxdeploy/files/data/local/linux.img
+/data/user/0/ru.meefik.linuxdeploy/files/data/local/linux.img
+```
+
+יש כפילויות וחוסר עקביות.
+
+## הפתרון - מתחילים מההתחלה עם path מוחלט
+
+צריך לעשות שני דברים:
+1. לנקות את הבלאגן של ה-paths
+2. להתקין מחדש עם path מפורש (לא `~`)
+
+**הזמן הזה לא יבזבז שעות** - ה-Install היה מהיר יחסית כי כבר יש לנו מאגר מקומי של חבילות.
+
+---
+
+### שלב 1: עצור את Linux Deploy
+
+לחץ STOP אם הסביבה רצה (אבל מהlog נראה שהיא לא באמת רצה).
+
+---
+
+### שלב 2: מחיקת image-ים ישנים מ-Termux
+
+ב-Termux כ-root (אתה כבר ב-root, רואה את ה-`#`):
+
+```bash
+rm -rf /data/data/ru.meefik.linuxdeploy/files/~
+```
+
+```bash
+rm -f /data/data/ru.meefik.linuxdeploy/files/data/local/linux.img
+```
+
+```bash
+rm -f /data/user/0/ru.meefik.linuxdeploy/files/data/local/linux.img
+```
+
+```bash
+rm -f /data/data/ru.meefik.linuxdeploy/files/linux.img
+```
+
+---
+
+### שלב 3: ודא שאין עוד image-ים מבולגנים
+
+```bash
+find / -name "linux.img" 2>/dev/null
+```
+
+**הפלט הצפוי**: שורה ריקה (אין שום linux.img).
+
+אם עדיין מוצא משהו - תמחק גם אותו:
+```bash
+rm -f <PATH-שמופיע>
+```
+
+---
+
+### שלב 4: שנה Installation path ב-Linux Deploy
+
+חזור ל-Linux Deploy → הגדרות הפרופיל (גלגל שיניים) → גלול עד **Installation path**.
+
+**שנה את הערך מ-`~/linux.img` ל-:**
+
+```
+/data/local/linux.img
+```
+
+(path מוחלט, בלי `~`)
+
+---
+
+### שלב 5: ודא שאר ההגדרות עדיין נכונות
+
+תוודא שלא השתנה כלום אחר:
+- Distribution: Debian
+- Suite: stable  
+- Architecture: arm64
+- Installation type: **File**
+- Installation path: **`/data/local/linux.img`** (השדה ששינית)
+- Image size: 8192
+- File system: ext4
+- User name: ha
+- SSH: Enable ✓
+- Init: Enable ✓
+
+---
+
+### שלב 6: ודא שוב SELinux ב-Permissive
+
+ב-Termux:
+
+```bash
+getenforce
+```
+
+אם לא Permissive:
+
+```bash
+setenforce 0
+```
+
+---
+
+### שלב 7: Install מחדש
+
+ב-Linux Deploy → תפריט → **Install** → אשר.
+
+הפעם זה אמור לעבוד יותר מהר (אולי 5-10 דקות) כי החבילות כבר ב-cache.
+
+---
+
+### שלב 8: כשתסיים - START
+
+לחץ START ותסתכל על הלוג. **הפעם אני מצפה לראות**:
+
+```
+:: Starting extra/ssh ... done
+<<< start
+```
+
+---
+
+## למה אני בטוח שזה יעבוד הפעם
+
+הראיה הברורה ביותר ב-log שלך הייתה השורה:
+```
+chroot: can't execute '/bin/su': No such file or directory
+```
+
+זה אומר ש-Linux Deploy ניסה chroot לתוך `/data/local/mnt/` **שהיה ריק**, כי ה-image האמיתי שהותקן היה במקום אחר. זה כשל מסוג "הקובץ במקום A, ה-mount עשה לתיקייה B שריקה".
+
+עם path מוחלט מהתחלה - אין אי בהירות, אין קונפליקטים בין מנגנוני expansion שונים. ה-image ייווצר ב-`/data/local/linux.img`, יעלה ל-`/data/local/mnt/`, ה-chroot יראה את כל הקבצים, וה-SSH יתחיל.
+
+---
+
+**עצור, תעשה את 7 השלבים, ותשלח צילום של הלוג של START.** שלב 8 הוא רגע האמת.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 אה, מעניין! אם SELinux כבר היה Permissive, אז הבעיה היא משהו אחר לגמרי. טעיתי בהנחה. בוא נבדוק מה באמת קורה.
 
 ## צריך מידע מדויק יותר
