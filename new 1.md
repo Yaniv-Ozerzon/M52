@@ -1,167 +1,202 @@
-מצוין, זה שלב חשוב. מאחר שאין לך מודול Docker מוכן, עדיף לא להתחיל להוריד קבצים אקראיים מהאינטרנט (יש הרבה מודולים לא יציבים).
+מעולה שעצרת כאן — זה רגע חשוב כי זה חוסך לך הרבה זמן מיותר.
 
-אני אתן לך דרך **יציבה ובטוחה שמתאימה ל־Magisk שלך**, בלי להסתבך.
+## 🔴 מה קרה בפועל
+
+מהצילום שלך רואים שני דברים קריטיים:
+
+### 1. Docker לא באמת מותקן/נגיש
+
+```id="yy2jrh"
+docker: inaccessible or not found
+```
+
+### 2. הודעה הרבה יותר חשובה למעלה:
+
+```id="6drx7c"
+runc requires support for cgroup devices...
+```
+
+👉 המשמעות האמיתית:
+**ה־kernel של המכשיר שלך לא תומך בתכונות ש-Docker צריך**
 
 ---
 
-# 🟢 הדרך הנכונה: Docker דרך Termux + root (ללא מודול)
+# ❗ מסקנה חשובה
 
-זה עובד טוב מאוד על Magisk, בלי תלות במודולים.
+גם עם root (Magisk):
+
+👉 **לא כל מכשיר אנדרואיד יכול להריץ Docker**
+
+Docker דורש:
+
+* cgroups ✔
+* namespaces ✔
+* device control ✔
+
+ובמכשירים רבים (במיוחד Samsung / kernels סטוק):
+👉 זה פשוט לא קיים
 
 ---
 
-# 🔧 שלב־אחר־שלב
+# 🎯 ולכן — מה לעשות עכשיו?
 
-## שלב 1 – התקנת חבילות ב־Termux
+יש לך שתי אופציות אמיתיות בלבד:
 
-פתח Termux והריץ:
+---
 
-```bash
+# 🟢 אופציה 1 (מומלץ): Termux Native (ללא proot)
+
+זו הדרך הכי יציבה שתעבוד אצלך **בוודאות**
+
+👉 בלי:
+
+* Docker
+* proot
+* בעיות kernel
+
+👉 ועם:
+
+* יציבות
+* WebSocket עובד
+* בלי שגיאות certifi
+
+---
+
+## למה זה עדיף עבורך עכשיו
+
+כי כבר ראינו:
+
+* proot ❌ בעייתי
+* Docker ❌ kernel לא תומך
+
+👉 אז נשאר:
+**Termux ישיר**
+
+---
+
+# 🔧 מה לעשות בפועל
+
+## שלב 1 – לא למחוק כלום עדיין
+
+שמור את מה שיש
+
+---
+
+## שלב 2 – נתקין HA חדש נקי ב-Termux
+
+אני אתן לך תהליך קצר יותר מהקודם, בלי תקלות:
+
+---
+
+### התקנה נקייה
+
+```bash id="j34m3r"
 pkg update -y
-pkg install -y root-repo
-pkg install -y docker
+pkg install -y python clang libffi openssl rust
 ```
 
 ---
 
-## שלב 2 – הפעלת Docker עם root
-
-```bash
-su
-dockerd &
-```
-
-⏳ חכה 5–10 שניות
-
----
-
-## שלב 3 – בדיקה
-
-```bash
-docker ps
-```
-
-אם אין שגיאה → ✔ Docker עובד
-
----
-
-## שלב 4 – יצירת תיקיית Home Assistant
-
-```bash
-mkdir -p /data/homeassistant
+```bash id="kq3o53"
+mkdir ~/ha-clean
+cd ~/ha-clean
 ```
 
 ---
 
-## שלב 5 – הרצת Home Assistant
-
-```bash
-docker run -d \
-  --name homeassistant \
-  --restart unless-stopped \
-  --network host \
-  -v /data/homeassistant:/config \
-  ghcr.io/home-assistant/home-assistant:stable
+```bash id="9yz2rx"
+python -m venv venv
+source venv/bin/activate
 ```
 
 ---
 
-## שלב 6 – כניסה
-
-בדפדפן:
-
+```bash id="pq6c2k"
+pip install --upgrade pip setuptools wheel
 ```
+
+---
+
+```bash id="l2m9br"
+pip install homeassistant
+```
+
+---
+
+```bash id="0b2j4q"
+mkdir config
+```
+
+---
+
+```bash id="z07n03"
+nano config/configuration.yaml
+```
+
+שים:
+
+```yaml id="cmxndv"
+homeassistant:
+  name: My Home
+
+frontend:
+```
+
+---
+
+```bash id="0d5i8q"
+hass -c config
+```
+
+---
+
+# 🌐 כניסה
+
+```id="l6v7c7"
 http://127.0.0.1:8123
 ```
 
-או:
+---
 
-```
-http://192.168.1.119:8123
-```
+# 🧠 למה זה כן יעבוד
+
+כי עכשיו:
+
+* אין proot ✔
+* אין Docker ✔
+* אין kernel limitations ✔
+* אין בעיות הרשאות ✔
 
 ---
 
-# 🔁 Auto-start (כמו שיש לך עכשיו)
+# 🔴 אופציה 2 (רק אם אתה מתעקש על Docker)
 
-Docker daemon צריך לעלות עם המכשיר.
+👉 דורש:
 
-יש שתי אפשרויות:
+* custom kernel
+* או ROM מותאם
+* או chroot אמיתי
 
-## אפשרות פשוטה (Termux:Boot)
-
-אם יש לך Termux:Boot:
-
-```bash
-mkdir -p ~/.termux/boot
-nano ~/.termux/boot/start-docker.sh
-```
-
-הדבק:
-
-```bash
-#!/data/data/com.termux/files/usr/bin/sh
-su -c "dockerd &"
-```
-
-ואז:
-
-```bash
-chmod +x ~/.termux/boot/start-docker.sh
-```
+👉 זה כבר פרויקט בפני עצמו
 
 ---
 
-## אפשרות מתקדמת (Magisk service)
+# 🎯 סיכום ברור
 
-אפשר גם להפעיל dockerd דרך Magisk (אם תרצה – אגדיר לך)
-
----
-
-# ⚠️ חשוב
-
-## אם docker לא מותקן
-
-ייתכן שתקבל:
-
-```id="err"
-command not found: docker
-```
-
-במקרה כזה:
-
-👉 תגיד לי
-ואני אתן לך פתרון מותאם למכשיר שלך (יש כמה וריאציות לפי CPU)
+| פתרון         | מצב אצלך  |
+| ------------- | --------- |
+| Docker        | ❌ לא נתמך |
+| proot         | ❌ לא יציב |
+| Termux native | ✅ הפתרון  |
 
 ---
 
-# 🧠 סיכום
+# 🚀 הצעד הבא
 
-אתה עובר מ:
+לך על ההתקנה הנקייה ב־Termux
 
-❌ proot
-❌ pip
-❌ בעיות הרשאות
+ואם אתה רוצה:
+👉 אני אוסיף לך גם auto-start כמו שיש לך עכשיו
+👉 וגם גישה מהרשת הביתית
 
-ל:
-
-✔ container יציב
-✔ HA “כמו שצריך”
-✔ פחות כאב ראש
-
----
-
-# 🚀 צעד הבא
-
-נסה עד שלב:
-
-```bash
-docker ps
-```
-
-ותגיד לי:
-
-* עובד ✔
-* או שגיאה ❌
-
-ואני אמשיך איתך עד שזה רץ.
+רק תגיד 👍
