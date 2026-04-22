@@ -1,3 +1,128 @@
+מעולה! קיבלתי את המידע שצריך. הפלט של Status נותן לי את **כל התמונה**. בוא נפענח:
+
+## מה הטלפון שלך מראה לנו
+
+```
+Device: SM-M526BR           ← M52 5G (הגרסה הבינלאומית)
+Android: 16                 ← אנדרואיד 16 (LineageOS 23)
+Architecture: aarch64       ← ✅
+Kernel: 5.4.254-qgki-...    ← Kernel 5.4 (יחסית ישן)
+Memory: 682/7366 MB         ← יש לך שפע זיכרון
+Swap: 3332/3683 MB          ← swap מוגדר, טוב
+SELinux: active             ← ← ← זה כנראה הבעיה!
+Loop devices: yes           ← ✅
+Support binfmt_misc: yes    ← ✅
+Supported FS: ... ext4 ...  ← ✅ ext4 נתמך
+Installed system: unknown   ← לא הותקן עדיין
+```
+
+## הסיבה לכישלון
+
+כל התנאים המוקדמים תקינים - loop devices זמינים, ext4 נתמך, binfmt_misc (חיוני לחלק מפעולות) זמין.
+
+**הבעיה: `SELinux: active`**
+
+SELinux במצב Enforcing יכול לחסום את Linux Deploy מ-mount. זה מאוד נפוץ על LineageOS מודרני. נצטרך להעביר את SELinux ל-Permissive זמנית (רק בשביל ה-install - אחרי זה זה לא קריטי).
+
+## הפתרון - שלב אחר שלב
+
+### שלב 1: פתח Termux ועבור ל-root
+
+```bash
+su
+```
+
+אשר את ה-prompt של Magisk. אתה אמור לראות `#` בסוף.
+
+---
+
+### שלב 2: בדוק את מצב SELinux
+
+```bash
+getenforce
+```
+
+אמור להחזיר `Enforcing`.
+
+---
+
+### שלב 3: העבר את SELinux ל-Permissive
+
+```bash
+setenforce 0
+```
+
+---
+
+### שלב 4: ודא שהעבר
+
+```bash
+getenforce
+```
+
+אמור עכשיו להחזיר `Permissive`.
+
+---
+
+### שלב 5: חזור ל-Linux Deploy
+
+1. פתח את Linux Deploy
+2. תפריט (שלוש נקודות) → **Install**
+3. אשר
+
+אמור הפעם לעבור את שלב ה-"Mounting the container" בהצלחה.
+
+---
+
+## חשוב לדעת על SELinux
+
+**זמניות של setenforce 0:**
+הפקודה `setenforce 0` נשמרת רק עד האתחול הבא. אחרי restart, SELinux יחזור ל-Enforcing. זה יכול להיות בעיה לטלפון שלך כי Linux Deploy צריך גם לעשות mount בהפעלה אוטומטית.
+
+**פתרון קבוע לאחר ההתקנה** (נטפל בזה בהמשך):
+- או הוספת `setenforce 0` לסקריפט boot (דרך Magisk)
+- או יצירת Magisk module שכבה קטנה משנה את ברירת המחדל
+- או פשוט להריץ `su -c 'setenforce 0'` ידנית לפני הפעלת HA (לא אידיאלי)
+
+**הערה על אבטחה:** SELinux ב-Permissive אומר שכל אפליקציה שקיבלה root יכולה לעשות יותר. על טלפון מוקדש ל-HA זה לא סיכון משמעותי - אתה לא מתקין עליו אפליקציות אקראיות. אבל אם אתה משתמש בטלפון גם לדברים אחרים, כדאי לדעת.
+
+## אם זה עדיין נכשל
+
+אם אחרי `setenforce 0` ההתקנה עדיין נכשלת, תגיד לי - יש עוד כמה דברים לנסות:
+- העברת ה-image למיקום אחר (`/data/local/tmp/linux.img` במקום `~/linux.img`)
+- שינוי `Installation path` בהגדרות Linux Deploy למסלול מלא
+- טעינת modules נוספים בקרנל
+
+---
+
+**עצור, תריץ את 4 השלבים למעלה, ותנסה Install שוב.** אמור להגיד לי:
+1. מה `getenforce` החזיר אחרי `setenforce 0` - `Permissive`?
+2. האם Install הצליח הפעם, ואם לא - צילום של הלוג החדש
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 מעולה, יש לך יותר מספיק מקום. 100GB+ פנויים זה שפע - נוכל ליצור image נדיב של 8GB שיאפשר גמישות ל-HA, logs, מסד נתונים של היסטוריה, וכל התוספות שתרצה להוסיף בעתיד.
 
 לפני שאני כותב את המדריך המלא, שתי הערות חשובות על Linux Deploy שכדאי שתדע מראש:
