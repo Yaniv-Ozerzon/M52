@@ -1,3 +1,133 @@
+אני רואה את הבעיה - יש כאן שני דברים שצריך לסדר. בוא נעשה הכל נקי.
+
+## מה קרה
+
+1. **השורה הפכה ל-`$` בלבד** (במקום `homeassistant@localhost:~$`) - זה אומר שהפקודה `su - homeassistant` נכנסה ל-shell מוגבל (`sh`), לא `bash`. לכן גם `source` לא עבד - `source` זו פקודה של bash.
+
+2. **`-sh: 2: source: Permission denied`** - ה-shell הנוכחי הוא `sh` ולא bash, ו-`source` לא מוכר בו.
+
+3. בדרך, אני רואה שגם ה-`cd /srv/homeassistant` "עבר" בלי שגיאה - זה סימן טוב, התיקייה קיימת.
+
+## איך לתקן - התחלה נקייה
+
+### שלב 1: צא מה-shell הנוכחי
+
+```bash
+exit
+```
+
+אמור לחזור ל-`root@localhost:~#`.
+
+---
+
+### שלב 2: היכנס למשתמש homeassistant עם bash במפורש
+
+```bash
+su - homeassistant -s /bin/bash
+```
+
+הפעם ה-prompt אמור להיות `homeassistant@localhost:~$` (עם bash).
+
+---
+
+### שלב 3: כניסה לתיקייה
+
+```bash
+cd /srv/homeassistant
+```
+
+---
+
+### שלב 4: הפעלת ה-venv
+
+```bash
+source bin/activate
+```
+
+עכשיו אמור להיות `(homeassistant) homeassistant@localhost:/srv/homeassistant$`.
+
+---
+
+### שלב 5: הגדרת משתני סביבה בתוך ה-venv
+
+```bash
+export CARGO_BUILD_TARGET=aarch64-unknown-linux-gnu
+```
+
+```bash
+export ANDROID_API_LEVEL=34
+```
+
+---
+
+### שלב 6: ניקוי cache
+
+```bash
+pip cache purge
+```
+
+---
+
+### שלב 7: התקנת cryptography כ-wheel מוכן
+
+```bash
+pip install --only-binary :all: cryptography
+```
+
+---
+
+### שלב 8: אם השלב הקודם הצליח
+
+```bash
+pip install homeassistant
+```
+
+---
+
+## למקרה שתרצה לסדר את זה לעתיד
+
+השגיאה של `su -` שמוציאה ל-sh במקום bash קורית כי ל-`homeassistant` אין shell מוגדר ברירת מחדל. אפשר לתקן את זה פעם אחת - כ-root ב-Debian:
+
+```bash
+usermod -s /bin/bash homeassistant
+```
+
+(אבל זה לא דחוף - התיקון של `-s /bin/bash` בפקודת `su` מספיק לעכשיו.)
+
+---
+
+**שוב - עצור בשלב 7 ותגיד לי אם cryptography הותקן בהצלחה**. אני צופה שהפעם זה יעבוד כי משתני הסביבה מוגדרים נכון בתוך ה-venv.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 אני רואה בדיוק מה קרה - זו טעות שלי, פספסתי משהו חשוב. בוא נבין ונסדר:
 
 ## מה קרה
