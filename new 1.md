@@ -1,3 +1,122 @@
+הבנתי, זה הרבה יותר נוח. הנה כל פקודה בחלונית נפרדת:
+
+---
+
+### שלב 1: יציאה מה-venv
+
+```bash
+deactivate
+```
+
+### שלב 2: יציאה למשתמש root
+
+```bash
+exit
+```
+
+אחרי הפקודה הזו שורת הפקודה אמורה להיות `root@localhost:~#` (בלי `(homeassistant)` בהתחלה).
+
+---
+
+### שלב 3: הגדרת משתני סביבה לsession הנוכחי
+
+```bash
+export CARGO_BUILD_TARGET=aarch64-unknown-linux-gnu
+```
+
+```bash
+export ANDROID_API_LEVEL=34
+```
+
+### שלב 4: שמירת המשתנים לצמיתות
+
+```bash
+echo 'export CARGO_BUILD_TARGET=aarch64-unknown-linux-gnu' >> /etc/profile
+```
+
+```bash
+echo 'export ANDROID_API_LEVEL=34' >> /etc/profile
+```
+
+---
+
+### שלב 5: חזרה למשתמש homeassistant
+
+```bash
+sudo -u homeassistant -H -s
+```
+
+שורת הפקודה אמורה להשתנות ל-`homeassistant@localhost:~$`.
+
+### שלב 6: כניסה לתיקייה והפעלת ה-venv
+
+```bash
+cd /srv/homeassistant
+```
+
+```bash
+source bin/activate
+```
+
+אחרי זה אמור להיות `(homeassistant) homeassistant@localhost:/srv/homeassistant$`.
+
+---
+
+### שלב 7: ניקוי cache של pip
+
+```bash
+pip cache purge
+```
+
+זה מוחק קבצי build חלקיים שנשארו מהניסיון הקודם שכשל.
+
+---
+
+### שלב 8: התקנת cryptography כ-wheel מוכן
+
+```bash
+pip install --only-binary :all: cryptography
+```
+
+זה השלב הקריטי - אם הוא עובר בהצלחה, כל השאר יעבור. חכה שזה יסתיים לפני שממשיכים.
+
+---
+
+### שלב 9: המשך התקנת Home Assistant
+
+```bash
+pip install homeassistant
+```
+
+זה ייקח 10-20 דקות. אם יש עוד חבילות שמנסות לקמפל ונכשלות, נטפל בהן אחר כך.
+
+---
+
+**עצור כאן ותגיד לי מה קרה בשלב 8** - זה הקריטי ביותר. אם `cryptography` הותקן בהצלחה, תראה בסוף שורה כמו:
+```
+Successfully installed cryptography-XX.X.X
+```
+
+אם זה נכשל, שלח צילום מסך ונמשיך מנקודה זו.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 מצוין, בחירה נכונה. נצא לדרך.
 
 לפני שמתחילים - **הערה חשובה אחת**: אנדרואיד אוהב להרוג תהליכים ברקע כדי לחסוך סוללה. כדי שה-HA שלך לא ימות כשהמסך נכבה, נצטרך לטפל בזה בסוף המדריך. אל תדלג על השלב הזה.
