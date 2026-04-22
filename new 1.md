@@ -1,3 +1,157 @@
+אני רואה בדיוק מה קרה - זו טעות שלי, פספסתי משהו חשוב. בוא נבין ונסדר:
+
+## מה קרה
+
+הפקודה `exit` הוציאה אותך **לא רק מ-venv של HA, אלא החוצה מ-Debian לגמרי**. עכשיו אתה חזרה ב-**Termux** (לא ב-Debian). אני רואה את הסימנים:
+
+1. `No superuser binary detected. Are you rooted?` - זו הודעה של Termux, לא של Debian
+2. השורה הוצגה כ-`~ $` במקום `root@localhost:~#` - זה prompt של Termux
+3. `bash: /etc/profile: Read-only file system` - ב-Termux, `/etc/profile` לא ניתן לעריכה
+4. `cd /srv/homeassistant: No such file or directory` - התיקייה הזאת קיימת רק בתוך Debian
+
+אני מתנצל על הבלבול, הייתי צריך לציין לעשות `exit` פעם אחת, לא פעמיים.
+
+## איך לתקן - להיכנס חזרה ל-Debian
+
+### שלב 1: חזרה ל-Debian
+
+```bash
+proot-distro login debian
+```
+
+השורה אמורה להשתנות ל-`root@localhost:~#`.
+
+---
+
+### שלב 2: הגדרת המשתנים (הפעם ב-Debian, לא ב-Termux)
+
+```bash
+export CARGO_BUILD_TARGET=aarch64-unknown-linux-gnu
+```
+
+```bash
+export ANDROID_API_LEVEL=34
+```
+
+---
+
+### שלב 3: שמירת המשתנים לצמיתות ב-Debian
+
+```bash
+echo 'export CARGO_BUILD_TARGET=aarch64-unknown-linux-gnu' >> /etc/profile
+```
+
+```bash
+echo 'export ANDROID_API_LEVEL=34' >> /etc/profile
+```
+
+הפעם זה יעבוד כי ב-Debian יש גישת כתיבה ל-/etc/profile.
+
+---
+
+### שלב 4: מעבר למשתמש homeassistant
+
+```bash
+su - homeassistant
+```
+
+שורת הפקודה תשתנה ל-`homeassistant@localhost:~$`.
+
+---
+
+### שלב 5: כניסה לתיקיית HA והפעלת venv
+
+```bash
+cd /srv/homeassistant
+```
+
+```bash
+source bin/activate
+```
+
+עכשיו אתה אמור לראות `(homeassistant) homeassistant@localhost:/srv/homeassistant$`.
+
+---
+
+### שלב 6: ניקוי cache
+
+```bash
+pip cache purge
+```
+
+---
+
+### שלב 7: טעינת משתני הסביבה גם בסביבת ה-venv
+
+```bash
+export CARGO_BUILD_TARGET=aarch64-unknown-linux-gnu
+```
+
+```bash
+export ANDROID_API_LEVEL=34
+```
+
+זה חשוב - המשתנים שהגדרנו ב-/etc/profile יטענו רק בהתחברות חדשה. כדי שהם יעבדו בsession הנוכחי, צריך להגדיר אותם שוב כאן.
+
+---
+
+### שלב 8: התקנת cryptography כ-wheel מוכן
+
+```bash
+pip install --only-binary :all: cryptography
+```
+
+---
+
+### שלב 9: אם שלב 8 הצליח, המשך ל-HA
+
+```bash
+pip install homeassistant
+```
+
+---
+
+**כלל אצבע לזכור מכאן והלאה:**
+
+- אם שורת הפקודה היא `~ $` → אתה ב-**Termux**
+- אם היא `root@localhost:~#` → אתה ב-**Debian** כ-root
+- אם היא `homeassistant@localhost:...$` → אתה ב-**Debian** כמשתמש homeassistant
+- אם יש `(homeassistant)` בהתחלה → אתה בתוך **venv** של Python
+
+כדי לחזור ל-Debian מכל מקום: `proot-distro login debian`.
+
+תעצור שוב בשלב 8 ותגיד לי אם `cryptography` הותקן בהצלחה.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 הבנתי, זה הרבה יותר נוח. הנה כל פקודה בחלונית נפרדת:
 
 ---
