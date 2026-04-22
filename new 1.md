@@ -1,30 +1,39 @@
-ברור. נבצע בדיקה ותיקון בצורה מסודרת, צעד־אחר־צעד, מתוך **Termux**. המטרה היא לבדוק אם הבעיה נובעת מ־database (recorder) ולנטרל אותה.
+מעולה, זה דווקא נותן כיוון מאוד ברור.
 
-אני כותב לך תהליך מדויק, בלי קפיצות.
+העובדה ש:
 
----
+* הגעת למסך התחברות ✔
+* הצלחת להזין משתמש וסיסמה ✔
+* ורק אז נתקעת שוב על **“Loading data”** ❌
 
-## שלב 1 – פתיחת Termux
+אומרת דבר חשוב מאוד:
 
-פתח את אפליקציית **Termux** בטלפון.
-
----
-
-## שלב 2 – כניסה לסביבת Ubuntu (proot)
-
-הרץ:
-
-```bash
-proot-distro login ubuntu
-```
-
-עכשיו אתה “בתוך” אובונטו.
+👉 ה־database (recorder) **לא היה הבעיה המרכזית**
+👉 אנחנו חוזרים לבעיה של **WebSocket / frontend**
 
 ---
 
-## שלב 3 – עצירת Home Assistant (אם הוא רץ)
+## מה זה אומר בפועל
 
-אם HA רץ ברקע, עצור אותו:
+בשלב ההתחברות:
+
+* ה־HTTP עובד ✔
+* האימות עובד ✔
+
+אבל אחרי זה:
+👉 ה־UI מנסה לפתוח WebSocket
+👉 וזה נכשל
+👉 ולכן נתקע על “Loading data”
+
+---
+
+## עכשיו ניגשים לפתרון האמיתי (מדויק למצב שלך)
+
+יש תיקון אחד קריטי שכדאי לנסות עכשיו.
+
+### שלב 1 – עצור את Home Assistant
+
+ב־Termux:
 
 ```bash
 pkill -f hass
@@ -32,130 +41,110 @@ pkill -f hass
 
 ---
 
-## שלב 4 – מעבר לתיקיית הקונפיגורציה
-
-הרץ:
+### שלב 2 – ערוך שוב את configuration.yaml
 
 ```bash
-cd /data/data/com.termux/files/home/hass-config
-```
-
-בדוק שאתה במקום הנכון:
-
-```bash
-ls
-```
-
-אתה אמור לראות:
-
-* `configuration.yaml`
-* `home-assistant_v2.db` (אם קיים)
-
----
-
-## שלב 5 – גיבוי הקובץ (חשוב)
-
-```bash
-cp configuration.yaml configuration.yaml.bak
+nano /data/data/com.termux/files/home/hass-config/configuration.yaml
 ```
 
 ---
 
-## שלב 6 – עריכת configuration.yaml
-
-פתח את הקובץ:
-
-```bash
-nano configuration.yaml
-```
-
----
-
-## שלב 7 – הוספת הגדרת recorder
-
-הוסף בסוף הקובץ את השורות הבאות:
+### שלב 3 – החלף את כל בלוק http בזה
 
 ```yaml
-recorder:
-  db_url: sqlite:///:memory:
+http:
+  server_host: 0.0.0.0
+  server_port: 8123
+  use_x_forwarded_for: true
+  trusted_proxies:
+    - 127.0.0.1
+    - 192.168.1.0/24
+    - ::1
 ```
 
-שמור:
-
-* Ctrl + X
-* Y
-* Enter
+שמור ויצא (Ctrl+X → Y → Enter)
 
 ---
 
-## שלב 8 – מחיקת בסיס הנתונים הישן
-
-זה שלב קריטי:
+### שלב 4 – הפעלה מחדש עם debug
 
 ```bash
-rm home-assistant_v2.db
+/data/data/com.termux/files/home/hass-venv/bin/hass -c /data/data/com.termux/files/home/hass-config --debug
 ```
-
-אם אין קובץ כזה – אין בעיה.
 
 ---
 
-## שלב 9 – הפעלה מחדש של Home Assistant עם לוגים
+### שלב 5 – בדיקה שוב בדפדפן
 
-הרץ:
-
-```bash
-/data/data/com.termux/files/home/hass-venv/bin/hass -c /data/data/com.termux/files/home/hass-config
-```
-
-אל תסגור את המסך.
-
----
-
-## שלב 10 – בדיקה בדפדפן
-
-מהטלפון (או ממכשיר אחר), פתח:
-
-```
+```text
 http://192.168.1.119:8123
 ```
 
 ---
 
-## תוצאה צפויה
+## למה זה חשוב
 
-### אם זה עבד:
+הגדרנו:
 
-* ה־UI ייטען ✔
-* אין יותר “Loading data”
-
-👉 המשמעות: הבעיה הייתה **database / recorder**
-
----
-
-### אם זה עדיין נתקע:
-
-👉 הבעיה היא **WebSocket / networking (proot)**
-ונעבור לכיוון אחר
+* `trusted_proxies` → פותר בעיות session
+* subnet של הרשת → מונע חסימות פנימיות
+* binding מלא → משפר WebSocket
 
 ---
 
-## שלב אופציונלי – אם זה עבד
+## אם זה עדיין לא עובד (סביר שעדיין תהיה בעיה)
 
-הפתרון עם `:memory:` הוא זמני (הנתונים לא נשמרים).
+אז אנחנו מגיעים לאבחנה כמעט סופית:
 
-אחר כך אפשר לעבור ל־DB קבוע:
+👉 **WebSocket לא עובד טוב בתוך proot על אנדרואיד**
 
-```yaml
-recorder:
-  db_url: sqlite:////data/data/com.termux/files/home/hass-config/home-assistant_v2.db
-```
+וזה משהו ש:
+
+* לא תמיד ניתן לפתור בקונפיגורציה
+* במיוחד עם ה־ifaddr patch שלך
 
 ---
 
-## אם זה לא עובד
+## בדיקה אחרונה (מאוד ממוקדת)
 
-אל תנחש.
+תוך כדי שה־HA רץ עם `--debug`, תנסה להתחבר שוב
+ותסתכל בלוג אם מופיע משהו כמו:
 
-תעתיק לי 10–20 שורות מהלוג שמופיעות אחרי ההפעלה
-ואכוון אותך בדיוק לנקודת הכשל הבאה.
+* `websocket connection failed`
+* `client disconnected`
+* `aiohttp`
+
+---
+
+## מסקנה מקצועית (ישירה)
+
+המצב שלך כרגע:
+
+| רכיב      | מצב       |
+| --------- | --------- |
+| Backend   | ✔ עובד    |
+| Auth      | ✔ עובד    |
+| UI        | ❌ לא נטען |
+| WebSocket | ❌ נכשל    |
+
+וזה כמעט תמיד בגלל:
+👉 הסביבה (proot על אנדרואיד)
+
+---
+
+## אם אתה רוצה פתרון שעובד בלי להילחם בזה
+
+יש 2 אופציות אמיתיות:
+
+1. להריץ Home Assistant על:
+
+   * מחשב אחר
+   * Raspberry Pi
+   * או Docker על Linux אמיתי
+
+2. או שאני אנסה איתך workaround עמוק יותר (יש כמה טריקים, אבל פחות יציבים)
+
+---
+
+אם תשלח לי 5–10 שורות מהלוג בזמן שה־UI נתקע,
+אני אוכל לאשר לך סופית שזה WebSocket ולא משהו אחר.
