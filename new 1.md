@@ -1,747 +1,117 @@
-**מצוין! עכשיו יש לי את התשובה המלאה!** הlog המפורט חשף את הבעיה בדיוק. בוא נפרק:
+אני רואה את אותה שגיאה שוב, וזה נותן לי מידע חשוב. בוא נחקור לעומק לפני שננסה עוד פתרונות.
 
-## הבעיה האמיתית
+## מה שונה ומה זהה
 
-**שורת המפתח:**
-```
-ls: /data/local/mnt/etc/ssh/: No such file or directory
-chroot: can't execute '/bin/su': No such file or directory
-```
-
-זה אומר ש-Linux Deploy ניסה לעשות chroot לתוך `/data/local/mnt/` - **אבל הוא mount את ה-image במקום אחר**!
-
-**שורת מפתח שנייה (מהבדיקה ב-Termux):**
-```
-/data/data/ru.meefik.linuxdeploy/files/~/linux.img
-```
-
-ה-image נמצא ב-path מוזר - **`~/linux.img`** לא הורחב לhome האמיתי, אלא נוצרה תיקייה בשם `~` עם קובץ בתוכה. זה בעיית escape של הסימן `~` בגרסה ישנה של Linux Deploy.
-
-מצד שני, ה-mount target הוא `/data/local/mnt/` - מקום ברירת מחדל ש-Linux Deploy מנסה לעשות chroot אליו, **אבל ה-image לא הותקן שם**.
-
-## למה זה קורה
-
-הגדרת `Installation path: ~/linux.img` (מהצילומים הקודמים שלך) הייתה אמורה להתפרש כ-`/data/data/ru.meefik.linuxdeploy/files/linux.img`, אבל בגלל באג בגרסה - היא יצרה תיקייה בשם `~` ושמה את הקובץ בתוכה.
-
-הקבצים שכן התקינו - חלקם נמצאים בכלל ב:
-```
-/data_mirror/data_ce/null/0/ru.meefik.linuxdeploy/files/data/local/linux.img
-/data/user/0/ru.meefik.linuxdeploy/files/data/local/linux.img
-```
-
-יש כפילויות וחוסר עקביות.
-
-## הפתרון - מתחילים מההתחלה עם path מוחלט
-
-צריך לעשות שני דברים:
-1. לנקות את הבלאגן של ה-paths
-2. להתקין מחדש עם path מפורש (לא `~`)
-
-**הזמן הזה לא יבזבז שעות** - ה-Install היה מהיר יחסית כי כבר יש לנו מאגר מקומי של חבילות.
-
----
-
-### שלב 1: עצור את Linux Deploy
-
-לחץ STOP אם הסביבה רצה (אבל מהlog נראה שהיא לא באמת רצה).
-
----
-
-### שלב 2: מחיקת image-ים ישנים מ-Termux
-
-ב-Termux כ-root (אתה כבר ב-root, רואה את ה-`#`):
-
-```bash
-rm -rf /data/data/ru.meefik.linuxdeploy/files/~
-```
-
-```bash
-rm -f /data/data/ru.meefik.linuxdeploy/files/data/local/linux.img
-```
-
-```bash
-rm -f /data/user/0/ru.meefik.linuxdeploy/files/data/local/linux.img
-```
-
-```bash
-rm -f /data/data/ru.meefik.linuxdeploy/files/linux.img
-```
-
----
-
-### שלב 3: ודא שאין עוד image-ים מבולגנים
-
-```bash
-find / -name "linux.img" 2>/dev/null
-```
-
-**הפלט הצפוי**: שורה ריקה (אין שום linux.img).
-
-אם עדיין מוצא משהו - תמחק גם אותו:
-```bash
-rm -f <PATH-שמופיע>
-```
-
----
-
-### שלב 4: שנה Installation path ב-Linux Deploy
-
-חזור ל-Linux Deploy → הגדרות הפרופיל (גלגל שיניים) → גלול עד **Installation path**.
-
-**שנה את הערך מ-`~/linux.img` ל-:**
-
-```
-/data/local/linux.img
-```
-
-(path מוחלט, בלי `~`)
-
----
-
-### שלב 5: ודא שאר ההגדרות עדיין נכונות
-
-תוודא שלא השתנה כלום אחר:
-- Distribution: Debian
-- Suite: stable  
-- Architecture: arm64
-- Installation type: **File**
-- Installation path: **`/data/local/linux.img`** (השדה ששינית)
-- Image size: 8192
-- File system: ext4
-- User name: ha
-- SSH: Enable ✓
-- Init: Enable ✓
-
----
-
-### שלב 6: ודא שוב SELinux ב-Permissive
-
-ב-Termux:
-
-```bash
-getenforce
-```
-
-אם לא Permissive:
-
-```bash
-setenforce 0
-```
-
----
-
-### שלב 7: Install מחדש
-
-ב-Linux Deploy → תפריט → **Install** → אשר.
-
-הפעם זה אמור לעבוד יותר מהר (אולי 5-10 דקות) כי החבילות כבר ב-cache.
-
----
-
-### שלב 8: כשתסיים - START
-
-לחץ START ותסתכל על הלוג. **הפעם אני מצפה לראות**:
-
-```
-:: Starting extra/ssh ... done
-<<< start
-```
-
----
-
-## למה אני בטוח שזה יעבוד הפעם
-
-הראיה הברורה ביותר ב-log שלך הייתה השורה:
-```
-chroot: can't execute '/bin/su': No such file or directory
-```
-
-זה אומר ש-Linux Deploy ניסה chroot לתוך `/data/local/mnt/` **שהיה ריק**, כי ה-image האמיתי שהותקן היה במקום אחר. זה כשל מסוג "הקובץ במקום A, ה-mount עשה לתיקייה B שריקה".
-
-עם path מוחלט מהתחלה - אין אי בהירות, אין קונפליקטים בין מנגנוני expansion שונים. ה-image ייווצר ב-`/data/local/linux.img`, יעלה ל-`/data/local/mnt/`, ה-chroot יראה את כל הקבצים, וה-SSH יתחיל.
-
----
-
-**עצור, תעשה את 7 השלבים, ותשלח צילום של הלוג של START.** שלב 8 הוא רגע האמת.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-אה, מעניין! אם SELinux כבר היה Permissive, אז הבעיה היא משהו אחר לגמרי. טעיתי בהנחה. בוא נבדוק מה באמת קורה.
-
-## צריך מידע מדויק יותר
-
-הלוג של Linux Deploy מראה רק "fail" אבל לא **למה** זה נכשל. צריך לראות את השגיאה המלאה.
-
-### שלב 1: ב-Linux Deploy - הגדר verbose logging
-
-1. חזור ל-Linux Deploy
-2. תפריט הראשי (שלוש קווים בצד שמאל למעלה) → **Settings** (לא Properties)
-3. מצא **"Debug mode"** או **"Trace mode"** או **"Verbose"** - סמן V
-4. (גם אם זה נקרא אחרת, כל אופציה שקשורה ל-log מפורט)
-
----
-
-### שלב 2: נסה START שוב
-
-לחץ **START** ותסתכל על הלוג החדש.
-
----
-
-### שלב 3: צילום של הלוג החדש
-
-תשלח לי צילום של הלוג אחרי ה-START, עם הפרטים הנוספים.
-
----
-
-## במקביל - בדיקה ידנית שתעזור אבחנה
-
-בזמן שאתה עושה את זה, בוא נבדוק שה-image בכלל תקין. פתח **Termux חדש** (שיהיה לך חלון נפרד מ-Linux Deploy):
-
-```bash
-su
-```
-
-```bash
-ls -lh /data/data/ru.meefik.linuxdeploy/linux.img
-```
-
-**או** (אם לא נמצא שם):
-
-```bash
-find / -name "linux.img" 2>/dev/null
-```
-
-תשלח לי מה הפלט. אני רוצה לראות:
-- שה-image קיים
-- שהגודל שלו ~8GB
-- באיזה path הוא בדיוק
-
----
-
-## הסבר מה אני מנסה להבין
-
-הlog שלך הראה:
+**זהה ל-log הקודם:**
 ```
 /proc ... skip
 /sys ... skip
 /dev ... skip
-:: Starting extra/ssh ... fail
+/dev/shm ... skip
+/dev/pts ... skip
+chroot: can't execute '/bin/su': No such file or directory
+ls: /data/local/mnt/etc/ssh/: No such file or directory
 ```
 
-**"skip"** לא בהכרח אומר שגיאה - זה יכול להיות "דילגתי על זה כי כבר mount-ed" או "דילגתי כי לא הצלחתי". בלי verbose log אני לא יודע איזה מהם.
+**זה אומר שהבעיה לא הייתה ה-path** - היא משהו עמוק יותר.
 
-**"fail" של SSH** יכולה להיות מכמה סיבות:
-1. SSH daemon לא מצליח לקרוא קובץ קונפיגורציה
-2. פורט 22 תפוס (אולי מ-Termux sshd אם היה לך)
-3. Keys לא נוצרו כראוי
-4. מישהו מה-mounts החסרים גורם לSSH לא לעבוד
-
-ולכן אני צריך את הפרטים לפני שאתן פתרון.
-
----
-
-**בקצרה מה לעשות עכשיו:**
-
-1. הפעל Debug mode ב-Linux Deploy Settings
-2. נסה START שוב
-3. שלח צילום של הלוג המפורט
-4. גם שלח את הפלט של `ls` / `find` מ-Termux שביקשתי
-
-אני מתנצל על הפתרון שלא התחבר - בלי ה-log המלא אני פשוט מנחש, וזה לא הוגן כלפיך. עם המידע הנוסף אני אוכל לתת לך פתרון מדויק.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-מעולה! קיבלתי את המידע שצריך. הפלט של Status נותן לי את **כל התמונה**. בוא נפענח:
-
-## מה הטלפון שלך מראה לנו
-
+**שינוי קטן וחשוב שאני רואה:**
 ```
-Device: SM-M526BR           ← M52 5G (הגרסה הבינלאומית)
-Android: 16                 ← אנדרואיד 16 (LineageOS 23)
-Architecture: aarch64       ← ✅
-Kernel: 5.4.254-qgki-...    ← Kernel 5.4 (יחסית ישן)
-Memory: 682/7366 MB         ← יש לך שפע זיכרון
-Swap: 3332/3683 MB          ← swap מוגדר, טוב
-SELinux: active             ← ← ← זה כנראה הבעיה!
-Loop devices: yes           ← ✅
-Support binfmt_misc: yes    ← ✅
-Supported FS: ... ext4 ...  ← ✅ ext4 נתמך
-Installed system: unknown   ← לא הותקן עדיין
+[00:10:51] Mounting the container:
+[00:10:51] / ... skip
 ```
 
-## הסיבה לכישלון
+ה-mount של ה-root נכשל גם הוא ("skip" כאן זה ניסיון שלא הצליח, לא דילוג מכוון). אם ה-/ לא mounted, ברור שה-chroot לא ימצא `/bin/su`.
 
-כל התנאים המוקדמים תקינים - loop devices זמינים, ext4 נתמך, binfmt_misc (חיוני לחלק מפעולות) זמין.
+## הבעיה האמיתית - אבחנה מחודשת
 
-**הבעיה: `SELinux: active`**
+הבעיה היא שהפעם **כשרצת START, ה-image בכלל לא mounted**. הסיבות האפשריות:
 
-SELinux במצב Enforcing יכול לחסום את Linux Deploy מ-mount. זה מאוד נפוץ על LineageOS מודרני. נצטרך להעביר את SELinux ל-Permissive זמנית (רק בשביל ה-install - אחרי זה זה לא קריטי).
+1. **כבר יש loop device pomנ-mounted מהפעם הקודמת** שתופס את ה-image
+2. **הקובץ `/data/local/linux.img` לא נוצר בשם הזה** - אולי שוב נוצר במקום אחר
+3. **הרשאות root** של Linux Deploy לא מועברות נכון לפעולת ה-mount
 
-## הפתרון - שלב אחר שלב
+## בדיקה ידנית - חשוב ביותר
 
-### שלב 1: פתח Termux ועבור ל-root
+בוא נברר מה באמת קורה. ב-Termux כ-root:
+
+### בדיקה 1: איפה נמצא ה-image עכשיו
 
 ```bash
-su
+find / -name "linux.img" 2>/dev/null
 ```
 
-אשר את ה-prompt של Magisk. אתה אמור לראות `#` בסוף.
+תשלח לי את הפלט. אני רוצה לדעת בדיוק איפה הוא יושב ובאיזה גודל.
 
 ---
 
-### שלב 2: בדוק את מצב SELinux
+### בדיקה 2: מה loop devices כרגע בשימוש
 
 ```bash
-getenforce
+losetup -a
 ```
 
-אמור להחזיר `Enforcing`.
+(אם הפקודה לא קיימת, תנסה `cat /proc/mounts | grep loop`)
 
 ---
 
-### שלב 3: העבר את SELinux ל-Permissive
+### בדיקה 3: האם /data/local/mnt קיים ועם מה
 
 ```bash
-setenforce 0
+ls -la /data/local/mnt/
 ```
 
 ---
 
-### שלב 4: ודא שהעבר
+### בדיקה 4: ניסיון mount ידני
+
+זו הבדיקה החשובה ביותר. נראה אם בכלל אפשר ל-mount את ה-image:
 
 ```bash
-getenforce
-```
-
-אמור עכשיו להחזיר `Permissive`.
-
----
-
-### שלב 5: חזור ל-Linux Deploy
-
-1. פתח את Linux Deploy
-2. תפריט (שלוש נקודות) → **Install**
-3. אשר
-
-אמור הפעם לעבור את שלב ה-"Mounting the container" בהצלחה.
-
----
-
-## חשוב לדעת על SELinux
-
-**זמניות של setenforce 0:**
-הפקודה `setenforce 0` נשמרת רק עד האתחול הבא. אחרי restart, SELinux יחזור ל-Enforcing. זה יכול להיות בעיה לטלפון שלך כי Linux Deploy צריך גם לעשות mount בהפעלה אוטומטית.
-
-**פתרון קבוע לאחר ההתקנה** (נטפל בזה בהמשך):
-- או הוספת `setenforce 0` לסקריפט boot (דרך Magisk)
-- או יצירת Magisk module שכבה קטנה משנה את ברירת המחדל
-- או פשוט להריץ `su -c 'setenforce 0'` ידנית לפני הפעלת HA (לא אידיאלי)
-
-**הערה על אבטחה:** SELinux ב-Permissive אומר שכל אפליקציה שקיבלה root יכולה לעשות יותר. על טלפון מוקדש ל-HA זה לא סיכון משמעותי - אתה לא מתקין עליו אפליקציות אקראיות. אבל אם אתה משתמש בטלפון גם לדברים אחרים, כדאי לדעת.
-
-## אם זה עדיין נכשל
-
-אם אחרי `setenforce 0` ההתקנה עדיין נכשלת, תגיד לי - יש עוד כמה דברים לנסות:
-- העברת ה-image למיקום אחר (`/data/local/tmp/linux.img` במקום `~/linux.img`)
-- שינוי `Installation path` בהגדרות Linux Deploy למסלול מלא
-- טעינת modules נוספים בקרנל
-
----
-
-**עצור, תריץ את 4 השלבים למעלה, ותנסה Install שוב.** אמור להגיד לי:
-1. מה `getenforce` החזיר אחרי `setenforce 0` - `Permissive`?
-2. האם Install הצליח הפעם, ואם לא - צילום של הלוג החדש
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-מעולה, יש לך יותר מספיק מקום. 100GB+ פנויים זה שפע - נוכל ליצור image נדיב של 8GB שיאפשר גמישות ל-HA, logs, מסד נתונים של היסטוריה, וכל התוספות שתרצה להוסיף בעתיד.
-
-לפני שאני כותב את המדריך המלא, שתי הערות חשובות על Linux Deploy שכדאי שתדע מראש:
-
-## הערה ראשונה - המצב של Linux Deploy ב-2026
-
-Linux Deploy היא אפליקציה ותיקה (מ-2012) שעדיין עובדת מצוין, אבל:
-- עדכון אחרון שלה היה ב-2021 בערך
-- ב-F-Droid יש גרסה 2.6.0 שהיא יציבה
-- זה אומר שהממשק שלה ישן, אבל הפונקציונליות של chroot לא השתנתה מאז - זה עדיין עובד מושלם
-
-## הערה שנייה - בחירה חשובה בתוך Linux Deploy
-
-Linux Deploy מציעה שתי דרכי התקנה:
-- **File** (קובץ image) - מומלץ בשבילך. יוצר קובץ אחד גדול שמתנהג כ-disk.
-- **Directory** - תיקייה רגילה. פחות מבודד, לפעמים יש בעיות הרשאות.
-
-אנחנו נלך עם File.
-
----
-
-אני אכתוב את המדריך בצורה מאוד ברורה - הפעם אתאמץ שכל פקודה תהיה בחלונית נפרדת והערות תמיד מחוץ. המדריך יהיה ארוך אבל מחולק לחלקים.
-
-## חלק 1: התקנת האפליקציות
-
-### פעולה 1.1: התקנת F-Droid (אם אין לך כבר)
-
-הורד מ: https://f-droid.org/
-
-אם יש לך כבר F-Droid, דלג.
-
----
-
-### פעולה 1.2: התקנת Linux Deploy
-
-פתח את F-Droid, חפש **"Linux Deploy"** והתקן. אם לא מופיע - הוסף את המאגר:
-```
-https://apt.izzysoft.de/fdroid/repo
-```
-(Settings → Repositories → + → הדבק).
-
----
-
-### פעולה 1.3: התקנת BusyBox (נדרש ל-Linux Deploy)
-
-ב-F-Droid, חפש **"BusyBox"** והתקן את הגרסה של **Meefik** (אותו מפתח של Linux Deploy).
-
----
-
-### פעולה 1.4: מתן הרשאות root
-
-פתח את Magisk → Superuser → תקבל בקשות הרשאה כשתריץ את Linux Deploy ו-BusyBox. אשר את שתיהן.
-
----
-
-## חלק 2: הגדרת Linux Deploy
-
-### פעולה 2.1: יצירת Profile
-
-1. פתח את Linux Deploy
-2. בצד ימין למעלה, לחץ על סמל הפרופיל (סמל איש קטן)
-3. לחץ על **+** ליצירת פרופיל חדש
-4. תן לו שם: `homeassistant`
-5. בחר אותו מהרשימה
-
----
-
-### פעולה 2.2: הגדרות הפרופיל (החלק הכי חשוב)
-
-לחץ על סמל **ההגדרות** (גלגל שיניים למטה). הנה הערכים שאתה צריך להכניס:
-
-| הגדרה | ערך | הערות |
-|---|---|---|
-| **Distribution** | Debian | |
-| **Distribution suite** | bookworm | Debian 12 - יציב מאוד עם HA |
-| **Architecture** | arm64 | |
-| **Installation type** | File | לא Directory |
-| **Installation path** | ~/linux.img | Linux Deploy יצור את זה |
-| **Image size (MB)** | 8192 | 8GB - מרווח טוב |
-| **File system** | ext4 | |
-| **User name** | ha | משתמש שלנו |
-| **User password** | (בחר סיסמה חזקה) | תזדקק לה להרבה דברים |
-| **Privileged users** | ha | |
-| **Localization** | en_US.UTF-8 | |
-| **DNS** | 1.1.1.1 | |
-| **Init system** | sysv | |
-
----
-
-### פעולה 2.3: הפעלת SSH (חשוב!)
-
-גלול למטה בהגדרות עד **"SSH"**:
-- הפעל את ה-**checkbox**
-- Port: **22** (ברירת מחדל)
-
-גלול עוד קצת עד **"Init"**:
-- הפעל **checkbox** של "Enable"
-
-זה חשוב - בלי זה תהיה תלוי במקלדת וירטואלית.
-
----
-
-## חלק 3: בניית ה-Image
-
-### פעולה 3.1: התחלת ההתקנה
-
-1. חזור למסך הראשי של Linux Deploy
-2. תפריט למעלה (שלוש נקודות) → **Install**
-3. יבקש אישור - אשר
-
-**זה ייקח 15-30 דקות**. תראה log רץ שמוריד חבילות. אל תסגור את האפליקציה.
-
-בסיום תראה `<<< end: install`.
-
----
-
-### פעולה 3.2: הפעלת הסביבה לראשונה
-
-1. במסך הראשי, לחץ **START** (כפתור גדול למטה)
-2. המתן לראות בלוג `<<< start` בלי שגיאות
-3. המצב יראה משהו כמו `running` או אור ירוק
-
----
-
-## חלק 4: כניסה דרך SSH מהמחשב
-
-עכשיו אנחנו עוזבים את הטרמינל בטלפון - עוברים למחשב.
-
-### פעולה 4.1: מציאת ה-IP של הטלפון
-
-בהגדרות WiFi של אנדרואיד, לחץ על הרשת שאתה מחובר אליה → שם יופיע IP address. שמור אותו.
-
-לחלופין, ב-Termux:
-```bash
-ifconfig wlan0 | grep inet
-```
-
----
-
-### פעולה 4.2: התחברות SSH מהמחשב
-
-אם אתה על Windows 11 - פתח PowerShell או Terminal.
-אם אתה על Linux/Mac - פתח Terminal.
-
-```bash
-ssh ha@<IP-של-הטלפון>
-```
-
-דוגמה אם ה-IP הוא 192.168.1.50:
-```bash
-ssh [email protected]
-```
-
-הקלד את הסיסמה שקבעת.
-
----
-
-## חלק 5: בדיקת הסביבה
-
-### פעולה 5.1: בדיקת platform - הרגע המכריע
-
-```bash
-python3 -c "import sysconfig; print(sysconfig.get_platform())"
-```
-
-**מה אתה אמור לראות:**
-```
-linux-aarch64
-```
-
-אם זה מה שיצא - **ניצחנו**. הסביבה מזהה את עצמה כ-Linux אמיתי. עכשיו Python ו-pip ימצאו wheels לכל החבילות.
-
-אם עדיין מופיע `android-` - שלח לי צילום מסך ונחליט מה לעשות.
-
----
-
-## חלק 6: התקנת Home Assistant
-
-### פעולה 6.1: מעבר ל-root
-
-```bash
-sudo -i
-```
-
-הסיסמה אותה סיסמה.
-
----
-
-### פעולה 6.2: עדכון והתקנת תלויות
-
-```bash
-apt update && apt upgrade -y
-```
-
----
-
-```bash
-apt install -y python3 python3-dev python3-venv python3-pip build-essential libssl-dev libffi-dev libjpeg-dev zlib1g-dev autoconf libopenjp2-7 libtiff6 libturbojpeg0-dev tzdata ffmpeg liblapack3 liblapack-dev libopenblas-dev git curl wget nano bluez libbluetooth-dev avahi-daemon
-```
-
----
-
-### פעולה 6.3: הגדרת timezone
-
-```bash
-ln -sf /usr/share/zoneinfo/Asia/Jerusalem /etc/localtime
+mkdir -p /data/local/mnt_test
 ```
 
 ```bash
-echo "Asia/Jerusalem" > /etc/timezone
+mount -o loop /data/local/linux.img /data/local/mnt_test
+```
+
+(אם ה-image במיקום אחר שגילית בבדיקה 1 - השתמש ב-path הנכון)
+
+**אם הצליח**, תבדוק:
+```bash
+ls /data/local/mnt_test/
+```
+
+אמור להראות `bin etc home root usr var` וכו'.
+
+ולאחר מכן נקה:
+```bash
+umount /data/local/mnt_test
 ```
 
 ```bash
-date
-```
-
-אמור להראות שעה ישראלית.
-
----
-
-### פעולה 6.4: יצירת משתמש homeassistant
-
-```bash
-useradd -rm homeassistant -G dialout,audio
-```
-
-```bash
-mkdir /srv/homeassistant
-```
-
-```bash
-chown homeassistant:homeassistant /srv/homeassistant
+rmdir /data/local/mnt_test
 ```
 
 ---
 
-### פעולה 6.5: מעבר למשתמש ויצירת venv
+## למה אני שואל את כל זה
 
-```bash
-su - homeassistant -s /bin/bash
-```
+יש שלושה תרחישים אפשריים והפתרון לכל אחד שונה:
 
-```bash
-cd /srv/homeassistant
-```
+**תרחיש A**: ה-image בכלל לא נוצר ב-path שביקשנו (`/data/local/linux.img`) אלא במקום אחר.
+**הפתרון**: לתקן את ה-Installation path בLinux Deploy שוב, או להשתמש ב-path שכן נוצר.
 
-```bash
-python3 -m venv .
-```
+**תרחיש B**: ה-image נוצר אבל פגום או ריק.
+**הפתרון**: למחוק ולהתקין מחדש.
 
-```bash
-source bin/activate
-```
-
-ה-prompt אמור להיות `(homeassistant) homeassistant@localhost:/srv/homeassistant$`.
+**תרחיש C**: ה-image תקין, אבל Linux Deploy לא מצליח לעשות mount בגלל בעיית הרשאות/SELinux/loop conflicts.
+**הפתרון**: לעשות את ה-mount דרך סקריפט ידני, או להוסיף `setenforce 0` בפעולות boot של Linux Deploy.
 
 ---
 
-### פעולה 6.6: שדרוג pip
-
-```bash
-python3 -m pip install --upgrade pip wheel setuptools
-```
+**עוד דבר חשוב לבדוק** - אני רואה ש-`/proc ... skip` מופיע. בעצם **זה תקין** (אלה filesystems מיוחדים שלא תמיד נדרשים). הבעיה האמיתית היא רק `/ ... skip` (השורה החמישית מלמעלה ב-Mounting block).
 
 ---
 
-### פעולה 6.7: התקנת Home Assistant
-
-```bash
-pip install homeassistant
-```
-
-**זה ייקח 10-20 דקות**. הפעם, מכיוון ש-Python מזהה את עצמו כ-linux-aarch64, pip ימצא wheels מוכנים לכל החבילות ולא יצטרך לקמפל. אם יראה שגיאות - שלח לי.
-
----
-
-### פעולה 6.8: הרצה ראשונה
-
-```bash
-hass
-```
-
-ההרצה הראשונה תיקח 3-5 דקות - HA מוריד תלויות נוספות ובונה config ראשוני.
-
-תראה הרבה הודעות. חכה לשורה:
-```
-INFO (MainThread) [homeassistant.core] Starting Home Assistant
-```
-
----
-
-### פעולה 6.9: גישה ל-HA
-
-מהדפדפן במחשב (או בטלפון):
-```
-http://<IP-של-הטלפון>:8123
-```
-
-אתה אמור לראות את מסך ההגדרה הראשוני של Home Assistant.
-
----
-
-## מה הלאה
-
-**עצור כאן** כשיש לך HA פועל ותגיע למסך הצהוב של יצירת משתמש.
-
-אחרי זה נטפל ב:
-- autoboot (הפעלה אוטומטית עם הטלפון)
-- MQTT
-- האינטגרציות הספציפיות שלך
-- נעילת הטלפון נגד kill של אנדרואיד
-
----
-
-**שלב קריטי לעצור בו ולדווח לי**: פעולה 5.1 - אחרי ה-SSH הראשון, הרץ את בדיקת ה-platform. אם רואים `linux-aarch64` - פניננו פנוי וכל השאר יעבוד חלק. אם רואים משהו אחר - נעצור, נבין, ונפתור.
-
-בהצלחה! 🚀
+**שלח לי את הפלט של 4 הבדיקות**, ואז אדע בדיוק איזה תרחיש זה ואיך לפתור. אני יודע שזה מתסכל - אנחנו בקצה של פתרון אבל צריך פיסת מידע אחרונה כדי לפצח את זה סופית.
