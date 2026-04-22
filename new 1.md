@@ -1,126 +1,161 @@
-זה כיוון טוב, והוא בהחלט יכול להיות רלוונטי גם למקרה שלך, אבל חשוב לדייק:
+ברור. נבצע בדיקה ותיקון בצורה מסודרת, צעד־אחר־צעד, מתוך **Termux**. המטרה היא לבדוק אם הבעיה נובעת מ־database (recorder) ולנטרל אותה.
 
-👉 הפתרון שציטטת מתייחס לבעיה מסוג **database / recorder**,
-בעוד שבמקרה שלך כבר ראינו סימנים חזקים לבעיה של **WebSocket / frontend**.
-
-ועדיין, יש חפיפה בין המקרים.
-
-## למה הפתרון הזה כן יכול לעבוד אצלך
-
-ב־Home Assistant, ה־UI לא נטען עד שכל ה־integrations הקריטיים (כולל recorder) עולים.
-
-אם ה־recorder נתקע (למשל בגלל SQLite או filesystem בעייתי), זה יכול לגרום בדיוק לאותה תוצאה:
-👉 “Loading data” לנצח
-
-ובסביבה שלך זה אפילו יותר הגיוני בגלל:
-
-* proot (filesystem לא סטנדרטי)
-* Android storage
-* SQLite שנשען על locking שלא תמיד עובד טוב שם
+אני כותב לך תהליך מדויק, בלי קפיצות.
 
 ---
 
-## איך לבדוק אם זה המקרה שלך (בלי ניחושים)
+## שלב 1 – פתיחת Termux
 
-פתח את הלוג בזמן הרצה:
+פתח את אפליקציית **Termux** בטלפון.
+
+---
+
+## שלב 2 – כניסה לסביבת Ubuntu (proot)
+
+הרץ:
 
 ```bash
-proot-distro login ubuntu --
-$TERMUX_HOME/hass-venv/bin/hass -c $TERMUX_HOME/hass-config
+proot-distro login ubuntu
 ```
 
-חפש שגיאות כמו:
-
-* `recorder`
-* `sqlite3`
-* `database is locked`
-* `unable to open database file`
-
-אם אתה רואה כאלה → זה בדיוק המקרה מהפתרון שמצאת.
+עכשיו אתה “בתוך” אובונטו.
 
 ---
 
-## פתרון נקי שאתה יכול לנסות עכשיו
+## שלב 3 – עצירת Home Assistant (אם הוא רץ)
 
-ערוך את `configuration.yaml` שלך והוסף:
+אם HA רץ ברקע, עצור אותו:
+
+```bash
+pkill -f hass
+```
+
+---
+
+## שלב 4 – מעבר לתיקיית הקונפיגורציה
+
+הרץ:
+
+```bash
+cd /data/data/com.termux/files/home/hass-config
+```
+
+בדוק שאתה במקום הנכון:
+
+```bash
+ls
+```
+
+אתה אמור לראות:
+
+* `configuration.yaml`
+* `home-assistant_v2.db` (אם קיים)
+
+---
+
+## שלב 5 – גיבוי הקובץ (חשוב)
+
+```bash
+cp configuration.yaml configuration.yaml.bak
+```
+
+---
+
+## שלב 6 – עריכת configuration.yaml
+
+פתח את הקובץ:
+
+```bash
+nano configuration.yaml
+```
+
+---
+
+## שלב 7 – הוספת הגדרת recorder
+
+הוסף בסוף הקובץ את השורות הבאות:
 
 ```yaml
 recorder:
   db_url: sqlite:///:memory:
 ```
 
-או לחלופין (יותר קיצוני לבדיקה):
+שמור:
+
+* Ctrl + X
+* Y
+* Enter
+
+---
+
+## שלב 8 – מחיקת בסיס הנתונים הישן
+
+זה שלב קריטי:
+
+```bash
+rm home-assistant_v2.db
+```
+
+אם אין קובץ כזה – אין בעיה.
+
+---
+
+## שלב 9 – הפעלה מחדש של Home Assistant עם לוגים
+
+הרץ:
+
+```bash
+/data/data/com.termux/files/home/hass-venv/bin/hass -c /data/data/com.termux/files/home/hass-config
+```
+
+אל תסגור את המסך.
+
+---
+
+## שלב 10 – בדיקה בדפדפן
+
+מהטלפון (או ממכשיר אחר), פתח:
+
+```
+http://192.168.1.119:8123
+```
+
+---
+
+## תוצאה צפויה
+
+### אם זה עבד:
+
+* ה־UI ייטען ✔
+* אין יותר “Loading data”
+
+👉 המשמעות: הבעיה הייתה **database / recorder**
+
+---
+
+### אם זה עדיין נתקע:
+
+👉 הבעיה היא **WebSocket / networking (proot)**
+ונעבור לכיוון אחר
+
+---
+
+## שלב אופציונלי – אם זה עבד
+
+הפתרון עם `:memory:` הוא זמני (הנתונים לא נשמרים).
+
+אחר כך אפשר לעבור ל־DB קבוע:
 
 ```yaml
 recorder:
-  purge_keep_days: 1
+  db_url: sqlite:////data/data/com.termux/files/home/hass-config/home-assistant_v2.db
 ```
 
-ואז:
-
-1. עצור את Home Assistant
-2. מחק את הקובץ:
-
-   ```bash
-   rm $TERMUX_HOME/hass-config/home-assistant_v2.db
-   ```
-3. הפעל מחדש
-
 ---
 
-## למה זה עובד
+## אם זה לא עובד
 
-אם הבעיה היא database:
+אל תנחש.
 
-* אתה עוקף את ה־SQLite הבעייתי
-* HA עולה בלי להיתקע על recorder
-* ה־frontend נטען
-
----
-
-## אבל חשוב להבין משהו קריטי
-
-יש לך עכשיו שתי תיאוריות:
-
-### תיאוריה A (קודמת)
-
-👉 WebSocket / networking (proot)
-
-### תיאוריה B (מה שמצאת)
-
-👉 recorder / database
-
-ושתיהן יכולות לגרום **בדיוק לאותו סימפטום**:
-👉 “Loading data”
-
----
-
-## איך מבדילים ביניהן מהר
-
-| בדיקה              | אם נכשל →                |
-| ------------------ | ------------------------ |
-| `/api` עובד        | לא database קריסה מלאה   |
-| `/lovelace` תקוע   | או WebSocket או recorder |
-| לוגים מראים sqlite | recorder                 |
-| אין שגיאות DB      | networking               |
-
----
-
-## המלצה מדויקת
-
-תעשה את זה בסדר הזה:
-
-1. 🔍 תסתכל בלוג (הכי חשוב)
-2. 🧪 נתק את recorder (כמו למעלה)
-3. 🔁 restart
-
-אם אחרי זה זה עובד →
-👉 הבעיה הייתה database
-
-אם לא →
-👉 חוזרים למסלול WebSocket (הכיוון הקודם שלי)
-
----
-
-אם אתה רוצה לקצר תהליך:
-תשלח לי 10–15 שורות מהלוג בזמן העלייה, ואני אגיד לך תוך שנייה אם זה recorder או networking.
+תעתיק לי 10–20 שורות מהלוג שמופיעות אחרי ההפעלה
+ואכוון אותך בדיוק לנקודת הכשל הבאה.
