@@ -1,162 +1,134 @@
-צודק. הפעם נעשה את זה נקי, מדויק, בלי קפיצות ובלי הנחות.
+בסדר. נעשה ניקוי מלא, מסודר, בלי להשאיר שאריות.
 
-הבעיה אצלך עכשיו פשוטה:
-👉 אתה בתוך root (`su`)
-👉 ושם אין `wget` → לכן ההורדה נכשלה
+המטרה:
+👉 למחוק **כל מה שקשור ל־Home Assistant**
+👉 להחזיר את Termux למצב נקי
 
-נבצע תהליך נכון שמפריד בין:
-
-* Termux (משתמש רגיל)
-* root (רק כשצריך)
+אני אתן לך פקודות מדויקות. תריץ לפי הסדר.
 
 ---
 
-# 🟢 התקנה נכונה – שלב אחר שלב
+# 🧹 שלב 1 – עצירת כל מה שרץ
 
-## 🔹 שלב 1 – חזור ל-Termux רגיל (לא root)
+פתח Termux:
 
-אם אתה רואה `#` בסוף השורה → אתה ב-root
+```bash id="f7c9yb"
+pkill -f hass
+pkill -f homeassistant
+pkill -f python
+```
 
-צא ממנו:
+---
 
-```bash
+# 🧹 שלב 2 – מחיקת כל תיקיות ההתקנה
+
+הרץ:
+
+```bash id="b6q9ec"
+rm -rf ~/ha
+rm -rf ~/ha-clean
+rm -rf ~/homeassistant
+rm -rf ~/hass-config
+rm -rf ~/hass-venv
+```
+
+---
+
+# 🧹 שלב 3 – מחיקת התקנות proot (אם קיימות)
+
+```bash id="1a6g5c"
+proot-distro remove ubuntu
+```
+
+אם יש שגיאה → לא נורא, ממשיכים
+
+---
+
+# 🧹 שלב 4 – מחיקת תיקיות מערכת שיצרנו
+
+⚠️ שים לב — רק אם יצרת:
+
+```bash id="0h9c5n"
+su
+rm -rf /data/debian
+rm -rf /data/homeassistant
 exit
 ```
 
-עד שאתה רואה `$`
-
 ---
 
-## 🔹 שלב 2 – התקן wget
+# 🧹 שלב 5 – ניקוי pip cache
 
-```bash
-pkg update -y
-pkg install -y wget
+```bash id="k6z0p1"
+pip cache purge
 ```
 
+אם אין pip → לא נורא
+
 ---
 
-## 🔹 שלב 3 – צור תיקייה ל-Debian
+# 🧹 שלב 6 – בדיקה שהכל נקי
 
-```bash
-mkdir -p /data/debian
-cd /data
+```bash id="0nqv6u"
+ls ~
 ```
 
+לא אמור להופיע:
+
+* ha
+* hass
+* homeassistant
+
 ---
 
-## 🔹 שלב 4 – הורדת Debian (חשוב: עכשיו לא ב-root)
+# 🧠 מצב עכשיו
 
-```bash
-wget https://github.com/termux/proot-distro/releases/download/v4.0.0/debian-aarch64-pd-v4.0.0.tar.xz
+✔ אין Home Assistant
+✔ אין venv
+✔ אין proot
+✔ אין התקנות שבורות
+
+👉 אתה נקי לגמרי
+
+---
+
+# ❗ לגבי מה שקרה קודם
+
+ה־404 שקיבלת:
+
+```text id="dnhl1x"
+ERROR 404: Not Found
 ```
 
-חכה לסיום ההורדה.
+👉 זה כי הקישור שנתתי היה לא מדויק
+👉 זו טעות שלי
 
 ---
 
-## 🔹 שלב 5 – מעבר ל-root
+# 🎯 מה עכשיו?
 
-```bash
-su
-```
+לפני שממשיכים שוב:
 
----
+אני רוצה שתבחר כיוון אחד בלבד:
 
-## 🔹 שלב 6 – חילוץ הקובץ
+## אפשרות A (פשוטה ויציבה)
 
-```bash
-tar -xJf debian-aarch64-pd-v4.0.0.tar.xz -C /data/debian --strip-components=1
-```
+👉 Home Assistant על Termux (עם גרסה תואמת)
 
----
+## אפשרות B (מתקדמת)
 
-## 🔹 שלב 7 – כניסה ל-Debian
+👉 chroot Debian (נגדיר נכון הפעם)
 
-```bash
-chroot /data/debian /bin/bash
-```
+## אפשרות C (הכי יציב בעולם)
 
-אם הצליח → תראה prompt חדש (לרוב עם `#`)
+👉 להריץ על מכשיר אחר ולהשתמש בטלפון רק כקליינט
 
 ---
 
-## 🔹 שלב 8 – עדכון מערכת Debian
+# 💬 תגיד לי
 
-```bash
-apt update
-apt upgrade -y
-```
+איזה כיוון אתה רוצה:
 
----
+👉 A / B / C
 
-## 🔹 שלב 9 – התקנת תלויות
-
-```bash
-apt install -y python3 python3-venv python3-pip \
-               build-essential libffi-dev libssl-dev \
-               libjpeg-dev zlib1g-dev
-```
-
----
-
-## 🔹 שלב 10 – התקנת Home Assistant
-
-```bash
-python3 -m venv /opt/ha
-source /opt/ha/bin/activate
-
-pip install --upgrade pip
-pip install homeassistant
-```
-
----
-
-## 🔹 שלב 11 – הרצה
-
-```bash
-mkdir -p /config
-hass -c /config
-```
-
----
-
-## 🔹 שלב 12 – כניסה
-
-פתח בדפדפן:
-
-```text
-http://127.0.0.1:8123
-```
-
----
-
-# ⚠️ אם משהו נתקע
-
-אל תמשיך לבד.
-
-שלח:
-
-* צילום מסך
-* או את השורה האחרונה שכתובה
-
-ואני מכוון אותך מיד.
-
----
-
-# 🧠 מה חשוב לזכור
-
-✔ wget תמיד ב-Termux רגיל
-✔ chroot רק אחרי שיש קובץ
-✔ לא מערבבים root ו-Termux בלי צורך
-
----
-
-אם אתה רוצה, אחרי שזה עובד:
-אני אוסיף לך:
-
-* auto-start עם boot
-* גישה מהרשת הביתית
-* שיפור ביצועים
-
-רק תגיד 👍
+ואני אתן לך **פעם אחת כמו שצריך — בלי טעויות ובלי קישורים שבורים**
