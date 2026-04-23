@@ -1,3 +1,74 @@
+Clear answer now — and it's not great news, but it's honest: **this version of proot-distro only offers Ubuntu 25.10.** There is no 24.04 option. The only Ubuntu alias is `ubuntu`, and we already know that fails with the debconf `Bad file descriptor` error.
+
+I owe you a correction: I was confident proot-distro would offer 24.04 as a separate option. On version 4.38.0 it doesn't — they only ship the current release. That changes the plan.
+
+## Realistic options, ranked
+
+### Option 1 — Use Debian instead (recommended)
+
+Debian is nearly identical to Ubuntu for Home Assistant's purposes — same package manager, same Python, same everything HA needs. And `debian` (trixie) is known to install cleanly on current proot-distro versions without the locales/debconf bug.
+
+This is what I'd do in your position. Try this single command:
+
+```bash
+proot-distro install debian
+```
+
+If it succeeds, we create the alias (pointing `ubuntu` → `debian` this time) and the HA script runs unchanged. If Debian also fails, we move to Option 2.
+
+### Option 2 — Downgrade proot-distro to a version that had 24.04
+
+This is more fragile. It involves manually pinning an older proot-distro package. I don't recommend starting here.
+
+### Option 3 — Try Ubuntu again with the debconf workaround
+
+There's a known workaround: install `ubuntu` then manually finish the failed config step. It sometimes works. But it's the path that's already burned your time twice, so I'd save this for last.
+
+## Let's try Option 1
+
+Cleanup, then install Debian:
+
+```bash
+proot-distro remove ubuntu 2>/dev/null
+proot-distro remove debian 2>/dev/null
+rm -rf ~/../usr/var/lib/proot-distro/installed-rootfs/ubuntu
+rm -rf ~/../usr/var/lib/proot-distro/installed-rootfs/debian
+```
+
+Then:
+
+```bash
+proot-distro install debian
+```
+
+## What to send me next
+
+When the command finishes, send a screenshot either way:
+
+- If it prints something like "Installation finished successfully" — great, we'll move to aliasing and the HA script
+- If it fails — I need the error text
+
+**Do not run anything else yet.** We test this one command, see what it says, then decide.
+
+## One honest commitment
+
+If Debian also fails, I'm not going to keep sending you try-this-try-that. At that point I'll tell you plainly that your specific Termux/proot-distro combination isn't cooperating with this script, and give you a realistic alternative — either a different Android app that bundles its own container (like Andronix), or running Home Assistant on a cheap Raspberry Pi Zero 2 W (~$15) which is what most people end up doing for an always-on hub. Not where I want to land, but you deserve to know when something's fighting you.
+
+Run the Debian install and screenshot the result.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 Here's the full clean sequence. Run each block in Termux in order. Wait for each block to finish before starting the next.
 
 ## Step 1 — Acquire wake lock
