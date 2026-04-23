@@ -1,194 +1,42 @@
-מצוין. יש לנו את כל מה שצריך:
+Yep — same failure, same root cause. Progress though: the `cpu_arch: unbound variable` error is gone (so the factory reset + clean Termux did help), but Step 2 still failed with **"Error: distribution 'ubuntu' is not installed."** Everything else cascades from that.
 
-- `/system/xbin/busybox` ✅ - busybox של המערכת זמין
-- `/data/adb/magisk/busybox` ✅ - busybox של Magisk זמין (טוב יותר, מלא)
+This means `proot-distro install ubuntu` is failing silently somewhere. The good news: we can run it manually and actually *see* the error, instead of the script swallowing it into a log file.
 
-עכשיו אני כותב את הסקריפט. עבדתי עליו בקפידה - בדקתי כל פקודה מול מה שראינו שעובד אצלך. אסביר אותו, אתן הוראות העתקה מדויקות, ונריץ.
+## Let's diagnose it directly
 
-## מה הסקריפט עושה (סקירה לפני שתעתיק)
+Please run these commands in Termux one at a time and tell me what happens. **Don't run the full setup script again yet.**
 
-הסקריפט יעשה 6 דברים, בכל אחד יש בדיקת הצלחה:
-
-1. **בדיקה ש-SELinux ב-Permissive** (אם לא, יעביר)
-2. **ניקוי mounts ישנים** אם יש
-3. **mount של ה-image** (זה החלק שעבד אצלך ידנית)
-4. **mount-bind של filesystems מיוחדים** (proc, sys, dev, dev/pts)
-5. **הגדרת DNS resolver** בתוך ה-chroot
-6. **הפעלת SSH server** בתוך ה-chroot
-
-## חלק 1: יצירת הסקריפט
-
-ב-Termux כ-root (אתה כבר ב-`#`):
-
+**1. Clean slate:**
 ```bash
-cat > /data/local/start-debian.sh << 'SCRIPT_END'
-#!/system/bin/sh
-
-IMG="/data/local/linux.img"
-MNT="/data/local/mnt"
-BUSYBOX="/data/adb/magisk/busybox"
-
-echo "==> Step 1: SELinux check"
-if [ "$(getenforce)" != "Permissive" ]; then
-    setenforce 0
-    echo "    SELinux set to Permissive"
-else
-    echo "    SELinux already Permissive"
-fi
-
-echo "==> Step 2: Cleanup old mounts"
-for m in /dev/pts /dev /sys /proc ""; do
-    if mountpoint -q "$MNT$m" 2>/dev/null; then
-        umount "$MNT$m" && echo "    unmounted $MNT$m"
-    fi
-done
-
-echo "==> Step 3: Mount image"
-mkdir -p "$MNT"
-mount -o loop,rw "$IMG" "$MNT"
-if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to mount image"
-    exit 1
-fi
-if [ ! -f "$MNT/bin/bash" ]; then
-    echo "ERROR: Mount succeeded but /bin/bash not found"
-    exit 1
-fi
-echo "    Image mounted successfully"
-
-echo "==> Step 4: Bind mount system filesystems"
-mount --bind /proc "$MNT/proc"
-mount --bind /sys "$MNT/sys"
-mount --bind /dev "$MNT/dev"
-mount --bind /dev/pts "$MNT/dev/pts"
-echo "    System filesystems bind-mounted"
-
-echo "==> Step 5: Setup DNS"
-echo "nameserver 1.1.1.1" > "$MNT/etc/resolv.conf"
-echo "nameserver 8.8.8.8" >> "$MNT/etc/resolv.conf"
-echo "    DNS configured"
-
-echo "==> Step 6: Start SSH server"
-$BUSYBOX chroot "$MNT" /bin/bash -c "
-    export HOME=/root
-    export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-    export TERM=xterm
-    
-    if [ ! -f /etc/ssh/ssh_host_rsa_key ]; then
-        echo '    Generating SSH host keys (first time only)...'
-        ssh-keygen -A
-    fi
-    
-    mkdir -p /run/sshd
-    
-    pkill -f sshd 2>/dev/null
-    sleep 1
-    
-    /usr/sbin/sshd
-    
-    if pgrep -f sshd > /dev/null; then
-        echo '    SSH server started successfully'
-    else
-        echo '    ERROR: SSH server failed to start'
-        exit 1
-    fi
-"
-
-echo ""
-echo "================================================"
-echo "  Debian environment is ready!"
-echo "  Connect via SSH:"
-echo "    ssh ha@<phone-ip>"
-echo "  Password: (the one you set in Linux Deploy)"
-echo "================================================"
-SCRIPT_END
+proot-distro remove ubuntu 2>/dev/null
+rm -rf ~/hass-venv ~/hass-config
 ```
 
-לחץ Enter אחרי הדבקה - השורה האחרונה `SCRIPT_END` חייבת להיות לבד בשורה. אמור להחזיר אותך ל-`#` בלי שגיאה.
-
----
-
-## חלק 2: תן לסקריפט הרשאות הרצה
-
+**2. Make sure Termux and proot-distro are current:**
 ```bash
-chmod +x /data/local/start-debian.sh
+termux-wake-lock
+pkg update -y
+pkg upgrade -y
+pkg install proot-distro -y
 ```
 
----
+If `pkg upgrade` shows any conflict prompt, just press `Y` and Enter.
 
-## חלק 3: ודא שהסקריפט נשמר נכון
-
+**3. The key test — run the Ubuntu install by itself so we can see the real error:**
 ```bash
-ls -lh /data/local/start-debian.sh
+proot-distro install ubuntu
 ```
 
-אמור להראות משהו כמו `-rwxr-xr-x ... 1.5K ... start-debian.sh`. תשלח צילום של הפלט.
+This command will either succeed (in which case we're unblocked) or print a real error message. **Take a screenshot of whatever it prints** — success or failure — and send it back to me.
 
----
+## What I'm looking for
 
-## חלק 4: הרצת הסקריפט
+Common reasons `proot-distro install ubuntu` fails that I want to rule out:
 
-```bash
-/data/local/start-debian.sh
-```
+- **Storage:** The Ubuntu rootfs is ~400 MB compressed, expands to ~1 GB. Your script said "unknown MB" for free storage, so I don't actually know if you have room. Run `df -h $HOME` and check the "Avail" column on the line containing your home path.
+- **Network/DNS:** Some mobile carriers or WiFi networks block the download mirror. A connection to google.com (what the preflight checks) doesn't guarantee the rootfs mirror is reachable.
+- **proot-distro version mismatch:** If the package repos weren't fully refreshed, you may have an older proot-distro trying to fetch a rootfs URL that no longer exists.
 
-**מה שאתה אמור לראות** (אם הכל עובד):
-```
-==> Step 1: SELinux check
-    SELinux already Permissive
-==> Step 2: Cleanup old mounts
-==> Step 3: Mount image
-    Image mounted successfully
-==> Step 4: Bind mount system filesystems
-    System filesystems bind-mounted
-==> Step 5: Setup DNS
-    DNS configured
-==> Step 6: Start SSH server
-    Generating SSH host keys (first time only)...
-    SSH server started successfully
+Once I see what step 3 actually prints, I can tell you exactly which one it is and the fix.
 
-================================================
-  Debian environment is ready!
-  Connect via SSH:
-    ssh ha@<phone-ip>
-  Password: (the one you set in Linux Deploy)
-================================================
-```
-
----
-
-## אם משהו נכשל
-
-הסקריפט מודפס מה הוא עושה בכל שלב **ועוצר עם הודעת ERROR ברורה** ברגע שמשהו נכשל. תשלח לי צילום של הפלט - אני אדע בדיוק איפה הכשל.
-
----
-
-## חלק 5: בדיקת SSH מהמחשב
-
-אחרי שהסקריפט מסיים בהצלחה, **מהמחשב שלך** (לא מהטלפון), פתח Terminal/PowerShell:
-
-```bash
-ssh ha@192.168.1.XXX
-```
-
-(החלף XXX ב-IP של הטלפון - מה שראינו בסרגל הכותרת של Linux Deploy: `192.168.1.11X`)
-
-הסיסמה: `Linpass1@romgili` (זו שראיתי בצילום ההגדרות שלך).
-
----
-
-## למה אני בטוח שזה יעבוד
-
-כל פקודה בסקריפט נבדקה כבר אצלך:
-
-| פקודה | איפה הוכח שעובדת |
-|---|---|
-| `setenforce 0` | בבדיקות `getenforce` שלנו |
-| `mount -o loop /data/local/linux.img /data/local/mnt_test` | עבד מושלם בבדיקה הידנית - ראינו את כל קבצי Debian |
-| `mount --bind /proc...` | פקודות סטנדרטיות של Linux שהקרנל שלך תומך בהן (ראינו ב-status) |
-| `chroot` עם busybox | busybox של Magisk זמין |
-| `sshd` | מותקן ב-Debian (ה-package "openssh-server" מותקן ב-bootstrap) |
-
-הדבר היחיד שלא נבדק בנפרד הוא הפעלת `sshd` בתוך chroot - אבל אם זה ייכשל, הסקריפט יגיד לי בדיוק.
-
-**עצור, תעתיק את חלק 1, תריץ את חלקים 2-3, תשלח צילום של חלק 3** (כדי שאוודא שהסקריפט נשמר נכון), ואז תרוץ חלק 4 ותשלח צילום של הפלט.
+One more honest note: I want to acknowledge you've now spent real time on this and it keeps failing at the same spot. If after we see the real error it turns out to be something hard to work around on your specific phone, I'll tell you straight rather than send you down another attempt. Let's see what the direct command says first.
