@@ -1,42 +1,111 @@
-Yep — same failure, same root cause. Progress though: the `cpu_arch: unbound variable` error is gone (so the factory reset + clean Termux did help), but Step 2 still failed with **"Error: distribution 'ubuntu' is not installed."** Everything else cascades from that.
+Here's the full clean sequence. Run each block in Termux in order. Wait for each block to finish before starting the next.
 
-This means `proot-distro install ubuntu` is failing silently somewhere. The good news: we can run it manually and actually *see* the error, instead of the script swallowing it into a log file.
+## Step 1 — Acquire wake lock
 
-## Let's diagnose it directly
+Keeps Termux alive if your screen turns off mid-install.
 
-Please run these commands in Termux one at a time and tell me what happens. **Don't run the full setup script again yet.**
-
-**1. Clean slate:**
-```bash
-proot-distro remove ubuntu 2>/dev/null
-rm -rf ~/hass-venv ~/hass-config
-```
-
-**2. Make sure Termux and proot-distro are current:**
 ```bash
 termux-wake-lock
+```
+
+## Step 2 — Clean up all previous attempts
+
+```bash
+proot-distro remove ubuntu 2>/dev/null
+proot-distro remove ubuntu-24.04 2>/dev/null
+rm -rf ~/../usr/var/lib/proot-distro/installed-rootfs/ubuntu
+rm -rf ~/../usr/var/lib/proot-distro/installed-rootfs/ubuntu-24.04
+rm -rf ~/hass-venv ~/hass-config ~/start-homeassistant.sh ~/stop-homeassistant.sh
+```
+
+"No such file or directory" messages are fine — they just mean there was nothing to remove.
+
+## Step 3 — Update Termux
+
+```bash
 pkg update -y
 pkg upgrade -y
-pkg install proot-distro -y
 ```
 
-If `pkg upgrade` shows any conflict prompt, just press `Y` and Enter.
+If it asks about keeping existing config files, just press Enter to accept the default.
 
-**3. The key test — run the Ubuntu install by itself so we can see the real error:**
+## Step 4 — Install Ubuntu 24.04 explicitly
+
 ```bash
-proot-distro install ubuntu
+proot-distro install ubuntu-24.04
 ```
 
-This command will either succeed (in which case we're unblocked) or print a real error message. **Take a screenshot of whatever it prints** — success or failure — and send it back to me.
+Wait for it to finish. This takes 3–10 minutes. **Stop here and tell me what happens:**
+- If it finishes successfully → continue to Step 5
+- If it fails → screenshot the error and send it to me before doing anything else
 
-## What I'm looking for
+## Step 5 — Verify it works
 
-Common reasons `proot-distro install ubuntu` fails that I want to rule out:
+```bash
+proot-distro login ubuntu-24.04 -- echo ok
+```
 
-- **Storage:** The Ubuntu rootfs is ~400 MB compressed, expands to ~1 GB. Your script said "unknown MB" for free storage, so I don't actually know if you have room. Run `df -h $HOME` and check the "Avail" column on the line containing your home path.
-- **Network/DNS:** Some mobile carriers or WiFi networks block the download mirror. A connection to google.com (what the preflight checks) doesn't guarantee the rootfs mirror is reachable.
-- **proot-distro version mismatch:** If the package repos weren't fully refreshed, you may have an older proot-distro trying to fetch a rootfs URL that no longer exists.
+You should see `ok` printed with no errors. If yes, continue. If not, stop and send me the output.
 
-Once I see what step 3 actually prints, I can tell you exactly which one it is and the fix.
+## Step 6 — Create the alias so the HA script finds it
 
-One more honest note: I want to acknowledge you've now spent real time on this and it keeps failing at the same spot. If after we see the real error it turns out to be something hard to work around on your specific phone, I'll tell you straight rather than send you down another attempt. Let's see what the direct command says first.
+The setup script looks for a distro named `ubuntu`. We'll point that name at the 24.04 rootfs.
+
+```bash
+cd ~/../usr/var/lib/proot-distro/installed-rootfs
+ln -s ubuntu-24.04 ubuntu
+cd ~
+```
+
+Verify:
+
+```bash
+proot-distro login ubuntu -- echo ok
+```
+
+Should again print `ok`.
+
+## Step 7 — Download the HA setup script (fresh copy)
+
+```bash
+cd ~
+rm -f setup-homeassistant.sh
+curl -O https://raw.githubusercontent.com/mayukh4/linux-android/main/setup-homeassistant.sh
+chmod +x setup-homeassistant.sh
+```
+
+## Step 8 — Run the HA setup script
+
+```bash
+bash ~/setup-homeassistant.sh
+```
+
+This takes 15–45 minutes. Step 4 (compiling Home Assistant) is the longest — 15–30 minutes of the total. Keep your phone plugged in.
+
+## Step 9 — After it finishes
+
+Once the script shows "HOME ASSISTANT INSTALLED", start it:
+
+```bash
+bash ~/start-homeassistant.sh
+```
+
+First launch takes 5–10 minutes to initialize. When it's ready, open a browser on any device on the same WiFi and go to:
+
+```
+http://<your-phone-ip>:8123
+```
+
+To find your phone's IP, open a second Termux session and run:
+
+```bash
+ip addr show wlan0 | grep 'inet '
+```
+
+---
+
+## If something goes wrong
+
+Don't keep re-running the script. Stop at whichever step failed, send me the screenshot, and I'll tell you what to do next. Each step is a real checkpoint — if Step 4 works, Step 5 should work, and so on.
+
+Start with Step 1 and let me know how Step 4 goes.
