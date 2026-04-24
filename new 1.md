@@ -1,3 +1,73 @@
+Two small issues to fix, both easy.
+
+## Issue 1: The config file has a duplicate `persistence_location` line
+
+This error:
+```
+Error: Duplicate persistence_location value in configuration.
+Error found at /etc/mosquitto/mosquitto.conf:19
+```
+
+means line 19 of the config already had `persistence_location` set, and then we added it again at the bottom. Mosquitto refuses to start with duplicates.
+
+**Fix it:**
+
+```bash
+nano /etc/mosquitto/mosquitto.conf
+```
+
+Go to line 19 (you can press `Ctrl+_` in nano, then type `19` and Enter to jump there — or just scroll with Down arrow). You should see a line like:
+
+```
+persistence_location /var/lib/mosquitto/
+```
+
+Near the bottom of the file, you'll see the one I had you add:
+
+```
+persistence_location /var/lib/mosquitto/
+```
+
+**Delete the one at the bottom** (the one we added). Leave the original line 19 alone. Use `Ctrl+K` to cut/delete the whole line when your cursor is on it.
+
+Save: `Ctrl+O`, Enter, `Ctrl+X`.
+
+## Issue 2: Mosquitto never actually started
+
+Your `ps aux | grep mosquitto` output only shows the `grep mosquitto` process itself (that's the line with `grep mosquitto` at the end) — no actual Mosquitto daemon. That's because the config error above prevented it from starting.
+
+**Now try to start it again:**
+
+```bash
+mosquitto -c /etc/mosquitto/mosquitto.conf -d
+ps aux | grep mosquitto
+```
+
+This time you should see **two** lines in the output — one that looks like `mosquitto -c /etc/mosquitto/mosquitto.conf -d`, and the `grep mosquitto` line. If you only see the grep line again, there's still a config error — run without the `-d` flag to see it:
+
+```bash
+mosquitto -c /etc/mosquitto/mosquitto.conf
+```
+
+That runs it in the foreground and prints any error directly. Once you see the error, fix it, then run with `-d` again. Ignore the `invoke-rc.d: No init system` warning from earlier — that's just Debian-in-proot complaining that there's no systemd, not a real problem.
+
+## Side note — also harmless
+
+The two lines that say `Setting up mosquitto ...` and `invoke-rc.d: could not determine current runlevel` during the apt install are not errors. Debian is just saying "I can't auto-start the service because there's no init system here" — which is fine, because we're starting it ourselves manually.
+
+---
+
+Send a screenshot after you've fixed the config and run the two commands. I want to see a real `mosquitto` process in the `ps aux | grep mosquitto` output before we move on.
+
+
+
+
+
+
+
+
+
+
 Good — now I understand your full state. Let me consolidate everything I know before writing steps:
 
 **What you have:**
