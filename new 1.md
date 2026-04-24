@@ -1,63 +1,85 @@
-Two small issues to fix, both easy.
+Good progress and one bad piece of news, but the diagnosis is clear.
 
-## Issue 1: The config file has a duplicate `persistence_location` line
+## Good
 
-This error:
+Mosquitto is now running — I can see it in the output:
 ```
-Error: Duplicate persistence_location value in configuration.
-Error found at /etc/mosquitto/mosquitto.conf:19
+u0_a166  13292  ...  mosquitto -c /etc/mosquitto/mosquitto.conf -d
+```
+The duplicate `persistence_location` issue is fixed. ✓
+
+## The problem
+
+```
+Connection error: Connection Refused: not authorised.
 ```
 
-means line 19 of the config already had `persistence_location` set, and then we added it again at the bottom. Mosquitto refuses to start with duplicates.
+Mosquitto is up but rejecting your login. The username/password aren't matching the password file. This means one of three things — and we need to figure out which.
 
-**Fix it:**
+## Also: a security concern
+
+I can see from your screenshot that your password is `Passmein@1`. Since this conversation goes through Anthropic's servers and you've now exposed it, **please change it after we get this working**. Not urgent for testing on your local network, but don't reuse it elsewhere.
+
+## Most likely cause: the password file isn't readable, or wasn't loaded
+
+When Mosquitto can't read the password file, it acts like the password is wrong. Two things to check, in order.
+
+### Check 1: Confirm the password file exists and has your user
 
 ```bash
-nano /etc/mosquitto/mosquitto.conf
+cat /etc/mosquitto/passwd
 ```
 
-Go to line 19 (you can press `Ctrl+_` in nano, then type `19` and Enter to jump there — or just scroll with Down arrow). You should see a line like:
+You should see one line starting with `ozerzon:` followed by a long hash. If the file is empty, missing, or doesn't have `ozerzon:`, then `mosquitto_passwd` didn't actually save it.
 
-```
-persistence_location /var/lib/mosquitto/
-```
-
-Near the bottom of the file, you'll see the one I had you add:
-
-```
-persistence_location /var/lib/mosquitto/
-```
-
-**Delete the one at the bottom** (the one we added). Leave the original line 19 alone. Use `Ctrl+K` to cut/delete the whole line when your cursor is on it.
-
-Save: `Ctrl+O`, Enter, `Ctrl+X`.
-
-## Issue 2: Mosquitto never actually started
-
-Your `ps aux | grep mosquitto` output only shows the `grep mosquitto` process itself (that's the line with `grep mosquitto` at the end) — no actual Mosquitto daemon. That's because the config error above prevented it from starting.
-
-**Now try to start it again:**
+### Check 2: Confirm Mosquitto's config actually points to it
 
 ```bash
-mosquitto -c /etc/mosquitto/mosquitto.conf -d
-ps aux | grep mosquitto
+grep -E "password_file|allow_anonymous" /etc/mosquitto/mosquitto.conf
 ```
 
-This time you should see **two** lines in the output — one that looks like `mosquitto -c /etc/mosquitto/mosquitto.conf -d`, and the `grep mosquitto` line. If you only see the grep line again, there's still a config error — run without the `-d` flag to see it:
+You should see exactly:
+```
+allow_anonymous false
+password_file /etc/mosquitto/passwd
+```
+
+If you see `allow_anonymous true`, or no `password_file` line, or a different path — that's the problem.
+
+### Check 3: See what Mosquitto actually thinks when you try to connect
+
+This is the most useful — kill Mosquitto and run it in the foreground so you can see the auth error in real time:
 
 ```bash
-mosquitto -c /etc/mosquitto/mosquitto.conf
+pkill mosquitto
+sleep 1
+mosquitto -c /etc/mosquitto/mosquitto.conf -v
 ```
 
-That runs it in the foreground and prints any error directly. Once you see the error, fix it, then run with `-d` again. Ignore the `invoke-rc.d: No init system` warning from earlier — that's just Debian-in-proot complaining that there's no systemd, not a real problem.
+The `-v` makes it verbose, no `-d` so it stays in the foreground. You'll see startup messages including any errors loading the password file.
 
-## Side note — also harmless
+Then **open a second Termux session** (swipe from the left edge → New Session), enter the container again:
 
-The two lines that say `Setting up mosquitto ...` and `invoke-rc.d: could not determine current runlevel` during the apt install are not errors. Debian is just saying "I can't auto-start the service because there's no init system here" — which is fine, because we're starting it ourselves manually.
+```bash
+proot-distro login ubuntu
+mosquitto_pub -h localhost -u ozerzon -P 'Passmein@1' -t test -m "hello"
+```
 
----
+Watch the first session's output. You'll see one of:
 
-Send a screenshot after you've fixed the config and run the two commands. I want to see a real `mosquitto` process in the `ps aux | grep mosquitto` output before we move on.
+- **"New connection from 127.0.0.1: ozerzon"** then "Sending CONNACK to ... (0)" → it actually worked
+- **"Client ... disconnected, not authorised."** + something about the password file → password file issue
+- **"Unable to load auth plugin"** or similar → config issue
+
+Send me a screenshot of what the foreground Mosquitto prints.
+
+## My honest guess
+
+Looking at your earlier screenshot more carefully: when you ran `mosquitto_passwd -c ... ozerzon`, it looked successful. But it's possible the file got created with wrong permissions, or in a place Mosquitto can't read inside the proot environment. The verbose run will tell us definitively.
+
+When you have the output, send it and we'll fix it in one go rather than guessing.
+
+
 
 
 
