@@ -1,77 +1,95 @@
 Excellent progress. The install worked — we just have one final hurdle.
+**Huge progress.** Z2M is working — it's just one config issue away from being fully connected. Let me decode what happened.
 
-## Good news
+## What worked (this is the important part)
 
-From image 1: `npm install` completed successfully. `data dir exists`, node_modules populated, `found 0 vulnerabilities`. The yellow `EBADENGINE` warnings are noise — they're saying Z2M wants Node 22.12+ and you have 20.20, but that's just a recommendation, not a blocker.
+Looking at images 1–3:
 
-## Current problem
+✅ Z2M started successfully
+✅ **Connected to your SLZB-06Mg24** — `EmberZNet, version 8.0.2 [GA]`, ASH protocol negotiated, EZSP started
+✅ **Formed a fresh Zigbee network** — `New network formed!`, channel 11, panId 65426
+✅ **Backed up coordinator state** to `/opt/zigbee2mqtt/data/coordinator_backup.json`
 
-From image 2 — when you ran `npm start`:
+This means: **the SLZB-06 is talking to Z2M perfectly.** The hardware/firmware/network/adapter setup is all correct. That was the part with the most uncertainty, and it's working.
+
+## The one remaining problem
+
+Image 3, this exact line:
 
 ```
-Building Zigbee2MQTT... (initial build), failed
-Error: Command failed: pnpm run prepack
-/bin/sh: 1: pnpm: Permission denied
+[2026-04-25 05:14:52] error: z2m: MQTT failed to connect, exiting...
+(Connection refused: Not authorized)
 ```
 
-Z2M needs to *build* itself before first run (it's a TypeScript project — needs to compile to JavaScript). The build script tries to use `pnpm`, an alternative package manager. It's not installed, so the build fails, so `npm start` fails.
+Z2M tried to log into Mosquitto with the credentials in `/opt/zigbee2mqtt/data/configuration.yaml` — and Mosquitto rejected it. So the password in your Z2M config doesn't match the password we set in Mosquitto.
 
-This is actually a recent Z2M change — they migrated their build tooling to pnpm. Easy fix.
+After Z2M can't reach MQTT, it gracefully shuts everything down (which is what images 4–5 show — that's not an error, that's correct cleanup).
+
+## Why this happens
+
+Two likely causes:
+1. The `configuration.yaml` was saved with the wrong password, or with quotes around it, or with the password from before we recreated the file with `mosquitto_passwd`
+2. The `@1` character in `Passmein@1` has a special meaning in YAML in some contexts — though it's usually fine inside a value, it's worth being defensive
 
 ## The fix
 
-Inside `/opt/zigbee2mqtt`:
+In your container session (`root@localhost:/opt/zigbee2mqtt#`):
+
+### Step 1 — Open the config file
 
 ```bash
-npm install -g pnpm
+nano /opt/zigbee2mqtt/data/configuration.yaml
 ```
 
-This installs pnpm globally. Should take less than a minute.
+### Step 2 — Make sure the password line is exactly this
 
-Verify it works:
+Look at the `mqtt:` block. The `password:` line should look like this — **with quotes** to make YAML treat the special character `@` literally:
+
+```yaml
+mqtt:
+  base_topic: zigbee2mqtt
+  server: mqtt://localhost:1883
+  user: ozerzon
+  password: "Passmein@1"
+```
+
+If the password line currently has no quotes, add them. If it has single quotes, change to double quotes. If anything else looks different, fix it.
+
+Save: `Ctrl+O`, Enter, `Ctrl+X`.
+
+### Step 3 — Verify Mosquitto still accepts those exact credentials
 
 ```bash
-pnpm --version
+mosquitto_pub -h localhost -u ozerzon -P 'Passmein@1' -t test -m hello && echo OK || echo FAILED
 ```
 
-You should see a version number like `9.x.x` or `10.x.x`. If you see "Permission denied" or "command not found", stop and tell me.
+You should see `OK`. If not, we have a Mosquitto-side issue and Z2M's config is actually fine — we'd need to debug Mosquitto. Tell me which result you see.
 
-## Then build Z2M manually first
-
-Rather than letting `npm start` trigger the build (where errors are harder to read), let's build it directly so we see any problems clearly:
+### Step 4 — Start Z2M again
 
 ```bash
 cd /opt/zigbee2mqtt
-pnpm run prepack
-```
-
-This compiles the TypeScript. **Takes 2–5 minutes.** It should end with no errors and your prompt back.
-
-## Then start Z2M
-
-```bash
 npm start
 ```
 
-You should now see the proper startup sequence:
+This time, in the log, instead of `MQTT failed to connect`, you should see:
 
 ```
-Starting Zigbee2MQTT 2.9.2
-Logging to console and ...
-Connected to MQTT server
-Adapter: ember
-Coordinator firmware: ...
-Started Zigbee2MQTT
+info: z2m: Connected to MQTT server
+info: z2m: Zigbee2MQTT started!
 ```
 
-That's the success state. **Leave it running** and let me know it's up. Then we can move on to:
-1. Adding the MQTT integration in HA's web UI
-2. Pairing your first Zigbee device via the Z2M frontend at `http://<phone-ip>:8080`
+That's the success state. Z2M will then sit there listening for Zigbee devices to pair.
 
-If something fails — at the `pnpm install`, the `pnpm run prepack`, or the `npm start` step — screenshot it and stop. Don't try to push past errors.
+## Once Z2M is up and stays up
 
-One more honest note: Z2M moved to pnpm fairly recently. If `pnpm run prepack` itself fails with some other error, the cleanest fallback is to install Z2M from the latest tagged release rather than the bleeding-edge `main` branch we cloned. Let's see if it works first — if it doesn't, we have a clear plan B.
+Don't close that Termux session — Z2M needs to stay running. Do these from another device:
 
+1. **Open `http://<phone-ip>:8080` in a browser** — that's the Z2M web frontend. You should see the dashboard.
+2. **In HA at `http://<phone-ip>:8123`:** Settings → Devices & Services → + Add Integration → search **MQTT**. Broker `localhost`, port `1883`, username `ozerzon`, password `Passmein@1`.
+3. **Pair a test device** if you have one ready: in the Z2M frontend, click "Permit join (All)", then put your Zigbee device into pairing mode.
+
+Send me a screenshot once you see "Zigbee2MQTT started!" in the log. That's the milestone.
 
 
 
