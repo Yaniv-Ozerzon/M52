@@ -1,85 +1,57 @@
-Now I can see exactly what's happening. Two issues, one fix.
+Two pieces of news, one good, one needs a small fix.
 
-## Issue 1: Your config still has a duplicate `persistence true`
+## Good news: Mosquitto auth works! ✓
 
-Look at your `mosquitto.conf` — image 1:
+Look at this line in image 1:
 
 ```
-persistence true              ← line 7
-persistence_location /var/lib/mosquitto/
-log_dest file ...
-include_dir /etc/mosquitto/conf.d
-listener 1883 0.0.0.0
-allow_anonymous false
-password_file /etc/mosquitto/passwd
-persistence true              ← line 16, DUPLICATE
+mosquitto_pub -h localhost -u ozerzon -P Passmein@1 -t test -m "hello" && echo OK || echo FAILED
+OK
 ```
 
-The file has `persistence true` at the top **and** at the bottom. Earlier I told you to delete the duplicate `persistence_location` — but you also need to delete the duplicate `persistence true` from the block I had you add. Both came from the same set of lines we appended.
+`OK` was printed — Mosquitto authentication is working. The first `FAILED` above it was just because you literally typed `'YOUR_NEW_PASSWORD'` instead of replacing it with the actual password (my placeholder syntax was confusing; sorry). The second attempt with the real password worked.
 
-## Issue 2: The auth failure is the real problem (and it's not what I thought)
+So Mosquitto is fully functional with username `ozerzon` and password `Passmein@1`. We can use that for now — but **change it later** since it's been visible across screenshots.
 
-The duplicate `persistence` is *not* what's causing the auth failure — Mosquitto would fail to start entirely if it didn't accept the config. Looking at the screenshot, Mosquitto is running fine.
+## What needs fixing: `npm ci` failed
 
-The real auth problem: I'm now confident this is the **`$7$` PBKDF2 hash format issue** I mentioned earlier. The Debian-shipped `mosquitto_passwd` creates `$7$...` hashes by default, but the running Mosquitto daemon in this proot environment can't verify them — so every login is rejected as "not authorised" even with the correct password.
+The error is clear:
 
-## The fix
+```
+npm error code EUSAGE
+npm error The `npm ci` command can only install with an existing package-lock.json
+```
 
-Inside the container (`root@localhost:~#`):
+`npm ci` requires a `package-lock.json` file to already exist in the repo. Looking at the cloned Z2M source, that file isn't present (Z2M's repo doesn't ship one — it gets generated when you run `npm install`).
 
-### Step 1 — Clean up the config
+The fix is simple: use `npm install` instead of `npm ci`. That was my mistake when writing the instructions earlier.
+
+## Run this now (you're already in `/opt/zigbee2mqtt`):
 
 ```bash
-nano /etc/mosquitto/mosquitto.conf
+npm install
 ```
 
-Delete the duplicate `persistence true` line at the bottom (line 16 in your screenshot). Use Ctrl+K with the cursor on that line. The file should end with `password_file /etc/mosquitto/passwd` — no extra `persistence true` after it.
+This is the same install process — it just generates `package-lock.json` on the way. **5–20 minutes again.** Don't close Termux, don't let your phone sleep.
 
-Save: `Ctrl+O`, Enter, `Ctrl+X`.
+You'll see lots of compilation messages. Some yellow warnings (`npm warn deprecated …`) are normal and can be ignored. What you don't want to see is red errors at the end. If it ends with a clean prompt (`root@localhost:/opt/zigbee2mqtt#`) and no red error block, it succeeded.
 
-### Step 2 — Recreate the password file with the older, more compatible hash format
+## After it finishes, verify it worked:
 
 ```bash
-rm /etc/mosquitto/passwd
-mosquitto_passwd -c -H sha512 /etc/mosquitto/passwd ozerzon
+ls /opt/zigbee2mqtt/data/ 2>/dev/null && echo "data dir exists" || echo "data dir missing"
+ls /opt/zigbee2mqtt/node_modules/ | head -5
 ```
 
-When prompted, enter your password twice. Use a different password this time since the previous one is exposed (`Passmein@1` was visible in earlier screenshots). I'll refer to it as `YOUR_NEW_PASSWORD` from here.
+You want to see:
+- `data dir exists` (or just a listing of files in that directory)
+- A list of npm package names from node_modules
 
-Verify the new hash format:
+If both look good, **stop there and tell me** — then we'll do the configuration.yaml step properly, with all your real values: SLZB-06 IP `192.168.1.126`, port `6638`, username `ozerzon`, password `Passmein@1`, adapter `ember`.
 
-```bash
-cat /etc/mosquitto/passwd
-```
+If `npm install` fails, screenshot the **last 30 lines** of output (the error context, not the full log). We'll handle it then.
 
-It should now start with `ozerzon:$6$...` instead of `$7$...`. The `$6$` is the SHA-512 format, which Mosquitto in this environment definitely supports.
 
-### Step 3 — Restart Mosquitto with the new password file
-
-```bash
-pkill mosquitto
-sleep 2
-mosquitto -c /etc/mosquitto/mosquitto.conf -d
-ps aux | grep mosquitto | grep -v grep
-```
-
-You should see exactly one Mosquitto process running.
-
-### Step 4 — Test auth with the new password
-
-```bash
-mosquitto_pub -h localhost -u ozerzon -P 'YOUR_NEW_PASSWORD' -t test -m hello && echo OK || echo FAILED
-```
-
-You should see `OK`.
-
-If you see `OK` — we're past Mosquitto and ready to move on to Zigbee2MQTT install. **Stop there and tell me.** Don't proceed to install Z2M yet — we'll do that as a separate step once auth is confirmed working.
-
-If you still see `FAILED` — send me a screenshot showing all four steps' output, and we'll dig deeper. There's one more thing we can try (running Mosquitto as a non-root user with explicit file permissions), but let's see this attempt first.
-
----
-
-A note on the `$7$` issue: I'm fairly confident this is what's happening based on the symptoms — config is correct, password file exists with the right username, Mosquitto is running, but every login is rejected. That pattern matches the `$7$` hash incompatibility almost exactly. If switching to `$6$` doesn't fix it, the next step would be checking file permissions on `/etc/mosquitto/passwd` (Mosquitto runs as the `mosquitto` user inside Debian, but in proot this might not work cleanly). We'll see.
 
 
 
