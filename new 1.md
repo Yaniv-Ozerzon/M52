@@ -1,3 +1,81 @@
+Good progress. Looking at your screenshot, the boot script ran successfully and HA came up — but Z2M never connected to the SLZB-06.
+
+Let me first verify what I see, then explain the likely cause.
+
+## What your log shows
+
+```
+=== Boot startup at Sat Apr 25 18:44:19 IDT 2026 ===
+Starting Mosquitto and Zigbee2MQTT...
+Starting Home Assistant...
+=== Startup script finished at Sat Apr 25 18:44:35 IDT 2026 ===
+```
+
+The script completed in 16 seconds — meaning it kicked off the background processes and exited. That's expected. But the script doesn't tell us whether Z2M actually managed to start successfully.
+
+## Likely cause
+
+There are two reasonable suspects:
+
+**1. The 15-second wait between Mosquitto+Z2M startup and HA startup is too short.** Z2M takes 30–60 seconds from `npm start` to actually being ready. If HA started polling MQTT before Z2M was alive, MQTT integration would show "unreachable" — even if Z2M came up shortly after. HA caches that initial failure state and shows it as broken until something nudges it.
+
+**2. Z2M didn't start at all.** Maybe the SLZB-06 had a stale socket from a previous Z2M run that didn't shut down cleanly. That'd cause Z2M to fail silently in the background.
+
+## Diagnose first
+
+Let's see which one it is. In Termux:
+
+```bash
+proot-distro login ubuntu -- bash -c "ps aux | grep -E 'mosquitto|node' | grep -v grep"
+```
+
+This shows what's running inside the Debian container. You should see:
+- A `mosquitto` line
+- A `node index.js` line (that's Zigbee2MQTT)
+
+If both are there → Z2M is running, MQTT integration in HA just needs a kick.
+If only Mosquitto is there → Z2M crashed; we need to look at its log.
+If neither → Mosquitto crashed too; the proot login from the boot script may have failed.
+
+Also check the Z2M log:
+
+```bash
+proot-distro login ubuntu -- tail -30 /tmp/z2m.log
+```
+
+The last lines will tell you whether Z2M started cleanly or hit an error.
+
+## Most likely fix (if Z2M is running)
+
+If both processes are running, just reload the MQTT integration in HA:
+
+1. Open HA → **Settings → Devices & Services → MQTT**
+2. Click the **⋮ menu** on the MQTT card
+3. Click **Reload**
+
+It should reconnect within seconds. The Zigbee2MQTT Bridge device should show "Connected" again.
+
+## If Z2M isn't running
+
+Send me what `tail -30 /tmp/z2m.log` shows. We'll fix the boot script based on what it tells us — most likely we need to either increase the `sleep 15` to `sleep 60`, or add a retry/health-check loop, or fix whatever made Z2M crash.
+
+Send me the output of those two diagnostic commands.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 Since you're already rooted, that's a meaningful difference — we have better tools available. Let me give you the clean instructions.
 
 ## Why root changes the approach
