@@ -1,48 +1,86 @@
-You jumped ahead to Step 10 (Z2M config) before we resolved the Mosquitto authentication problem. We need to back up — but first let's deal with what's on screen.
+Now I can see exactly what's happening. Two issues, one fix.
 
-## Two things going on here
+## Issue 1: Your config still has a duplicate `persistence true`
 
-**1. Nano can't save the file:** "Error writing /opt/zigbee2mqtt/data/configuration.yaml" — most likely because the `/opt/zigbee2mqtt/data/` directory doesn't exist yet, or you're not the file owner. This means Step 9 (`npm ci` for Zigbee2MQTT) hasn't completed successfully — Z2M creates that `data` directory on first run.
+Look at your `mosquitto.conf` — image 1:
 
-**2. The Mosquitto auth issue from before is still unresolved.** We never got the verbose-mode test output. If we move forward with Z2M now, it'll just fail to connect to MQTT for the same reason `mosquitto_pub` failed earlier.
-
-## Let's stop and finish things in order
-
-Please don't try to save the Z2M config yet. Exit nano without saving:
-- Press `Ctrl+X`
-- When it asks "Save modified buffer?" → press `N`
-
-## Where you actually are
-
-I need to understand your current state before suggesting next steps. Can you tell me:
-
-1. **Did you complete Step 9 (`npm ci` inside `/opt/zigbee2mqtt`)?** That's the long 5–20 minute install. If you skipped it or it errored out, the `data` directory won't exist and we need to fix that first.
-
-2. **Did the Mosquitto auth test ever succeed?** From your last screenshot we saw "Connection Refused: not authorised" but we never ran the verbose-mode test in two sessions to see the real error.
-
-## Suggested order to fix things
-
-Do these in order, in your container session (`root@localhost:~#`):
-
-**Verify Z2M install:**
-```bash
-ls /opt/zigbee2mqtt/
-ls /opt/zigbee2mqtt/data/ 2>/dev/null || echo "data directory does not exist"
+```
+persistence true              ← line 7
+persistence_location /var/lib/mosquitto/
+log_dest file ...
+include_dir /etc/mosquitto/conf.d
+listener 1883 0.0.0.0
+allow_anonymous false
+password_file /etc/mosquitto/passwd
+persistence true              ← line 16, DUPLICATE
 ```
 
-**Verify Mosquitto state:**
+The file has `persistence true` at the top **and** at the bottom. Earlier I told you to delete the duplicate `persistence_location` — but you also need to delete the duplicate `persistence true` from the block I had you add. Both came from the same set of lines we appended.
+
+## Issue 2: The auth failure is the real problem (and it's not what I thought)
+
+The duplicate `persistence` is *not* what's causing the auth failure — Mosquitto would fail to start entirely if it didn't accept the config. Looking at the screenshot, Mosquitto is running fine.
+
+The real auth problem: I'm now confident this is the **`$7$` PBKDF2 hash format issue** I mentioned earlier. The Debian-shipped `mosquitto_passwd` creates `$7$...` hashes by default, but the running Mosquitto daemon in this proot environment can't verify them — so every login is rejected as "not authorised" even with the correct password.
+
+## The fix
+
+Inside the container (`root@localhost:~#`):
+
+### Step 1 — Clean up the config
+
 ```bash
+nano /etc/mosquitto/mosquitto.conf
+```
+
+Delete the duplicate `persistence true` line at the bottom (line 16 in your screenshot). Use Ctrl+K with the cursor on that line. The file should end with `password_file /etc/mosquitto/passwd` — no extra `persistence true` after it.
+
+Save: `Ctrl+O`, Enter, `Ctrl+X`.
+
+### Step 2 — Recreate the password file with the older, more compatible hash format
+
+```bash
+rm /etc/mosquitto/passwd
+mosquitto_passwd -c -H sha512 /etc/mosquitto/passwd ozerzon
+```
+
+When prompted, enter your password twice. Use a different password this time since the previous one is exposed (`Passmein@1` was visible in earlier screenshots). I'll refer to it as `YOUR_NEW_PASSWORD` from here.
+
+Verify the new hash format:
+
+```bash
+cat /etc/mosquitto/passwd
+```
+
+It should now start with `ozerzon:$6$...` instead of `$7$...`. The `$6$` is the SHA-512 format, which Mosquitto in this environment definitely supports.
+
+### Step 3 — Restart Mosquitto with the new password file
+
+```bash
+pkill mosquitto
+sleep 2
+mosquitto -c /etc/mosquitto/mosquitto.conf -d
 ps aux | grep mosquitto | grep -v grep
 ```
 
-**Test auth once more, simply:**
+You should see exactly one Mosquitto process running.
+
+### Step 4 — Test auth with the new password
+
 ```bash
-mosquitto_pub -h localhost -u ozerzon -P 'Passmein@1' -t test -m hello && echo OK || echo FAILED
+mosquitto_pub -h localhost -u ozerzon -P 'YOUR_NEW_PASSWORD' -t test -m hello && echo OK || echo FAILED
 ```
 
-Send me a screenshot of all three outputs together. That tells me everything I need to know to give you the right next step. Don't run any other commands until I see that.
+You should see `OK`.
 
-I should have been more explicit that Step 10 depends on both Steps 7 (Mosquitto auth working) and 9 (Z2M installed) succeeding first. My fault for not flagging that more clearly.
+If you see `OK` — we're past Mosquitto and ready to move on to Zigbee2MQTT install. **Stop there and tell me.** Don't proceed to install Z2M yet — we'll do that as a separate step once auth is confirmed working.
+
+If you still see `FAILED` — send me a screenshot showing all four steps' output, and we'll dig deeper. There's one more thing we can try (running Mosquitto as a non-root user with explicit file permissions), but let's see this attempt first.
+
+---
+
+A note on the `$7$` issue: I'm fairly confident this is what's happening based on the symptoms — config is correct, password file exists with the right username, Mosquitto is running, but every login is rejected. That pattern matches the `$7$` hash incompatibility almost exactly. If switching to `$6$` doesn't fix it, the next step would be checking file permissions on `/etc/mosquitto/passwd` (Mosquitto runs as the `mosquitto` user inside Debian, but in proot this might not work cleanly). We'll see.
+
 
 
 
