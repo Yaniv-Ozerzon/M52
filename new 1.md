@@ -1,56 +1,76 @@
-Two pieces of news, one good, one needs a small fix.
+Excellent progress. The install worked — we just have one final hurdle.
 
-## Good news: Mosquitto auth works! ✓
+## Good news
 
-Look at this line in image 1:
+From image 1: `npm install` completed successfully. `data dir exists`, node_modules populated, `found 0 vulnerabilities`. The yellow `EBADENGINE` warnings are noise — they're saying Z2M wants Node 22.12+ and you have 20.20, but that's just a recommendation, not a blocker.
 
-```
-mosquitto_pub -h localhost -u ozerzon -P Passmein@1 -t test -m "hello" && echo OK || echo FAILED
-OK
-```
+## Current problem
 
-`OK` was printed — Mosquitto authentication is working. The first `FAILED` above it was just because you literally typed `'YOUR_NEW_PASSWORD'` instead of replacing it with the actual password (my placeholder syntax was confusing; sorry). The second attempt with the real password worked.
-
-So Mosquitto is fully functional with username `ozerzon` and password `Passmein@1`. We can use that for now — but **change it later** since it's been visible across screenshots.
-
-## What needs fixing: `npm ci` failed
-
-The error is clear:
+From image 2 — when you ran `npm start`:
 
 ```
-npm error code EUSAGE
-npm error The `npm ci` command can only install with an existing package-lock.json
+Building Zigbee2MQTT... (initial build), failed
+Error: Command failed: pnpm run prepack
+/bin/sh: 1: pnpm: Permission denied
 ```
 
-`npm ci` requires a `package-lock.json` file to already exist in the repo. Looking at the cloned Z2M source, that file isn't present (Z2M's repo doesn't ship one — it gets generated when you run `npm install`).
+Z2M needs to *build* itself before first run (it's a TypeScript project — needs to compile to JavaScript). The build script tries to use `pnpm`, an alternative package manager. It's not installed, so the build fails, so `npm start` fails.
 
-The fix is simple: use `npm install` instead of `npm ci`. That was my mistake when writing the instructions earlier.
+This is actually a recent Z2M change — they migrated their build tooling to pnpm. Easy fix.
 
-## Run this now (you're already in `/opt/zigbee2mqtt`):
+## The fix
+
+Inside `/opt/zigbee2mqtt`:
 
 ```bash
-npm install
+npm install -g pnpm
 ```
 
-This is the same install process — it just generates `package-lock.json` on the way. **5–20 minutes again.** Don't close Termux, don't let your phone sleep.
+This installs pnpm globally. Should take less than a minute.
 
-You'll see lots of compilation messages. Some yellow warnings (`npm warn deprecated …`) are normal and can be ignored. What you don't want to see is red errors at the end. If it ends with a clean prompt (`root@localhost:/opt/zigbee2mqtt#`) and no red error block, it succeeded.
-
-## After it finishes, verify it worked:
+Verify it works:
 
 ```bash
-ls /opt/zigbee2mqtt/data/ 2>/dev/null && echo "data dir exists" || echo "data dir missing"
-ls /opt/zigbee2mqtt/node_modules/ | head -5
+pnpm --version
 ```
 
-You want to see:
-- `data dir exists` (or just a listing of files in that directory)
-- A list of npm package names from node_modules
+You should see a version number like `9.x.x` or `10.x.x`. If you see "Permission denied" or "command not found", stop and tell me.
 
-If both look good, **stop there and tell me** — then we'll do the configuration.yaml step properly, with all your real values: SLZB-06 IP `192.168.1.126`, port `6638`, username `ozerzon`, password `Passmein@1`, adapter `ember`.
+## Then build Z2M manually first
 
-If `npm install` fails, screenshot the **last 30 lines** of output (the error context, not the full log). We'll handle it then.
+Rather than letting `npm start` trigger the build (where errors are harder to read), let's build it directly so we see any problems clearly:
 
+```bash
+cd /opt/zigbee2mqtt
+pnpm run prepack
+```
+
+This compiles the TypeScript. **Takes 2–5 minutes.** It should end with no errors and your prompt back.
+
+## Then start Z2M
+
+```bash
+npm start
+```
+
+You should now see the proper startup sequence:
+
+```
+Starting Zigbee2MQTT 2.9.2
+Logging to console and ...
+Connected to MQTT server
+Adapter: ember
+Coordinator firmware: ...
+Started Zigbee2MQTT
+```
+
+That's the success state. **Leave it running** and let me know it's up. Then we can move on to:
+1. Adding the MQTT integration in HA's web UI
+2. Pairing your first Zigbee device via the Z2M frontend at `http://<phone-ip>:8080`
+
+If something fails — at the `pnpm install`, the `pnpm run prepack`, or the `npm start` step — screenshot it and stop. Don't try to push past errors.
+
+One more honest note: Z2M moved to pnpm fairly recently. If `pnpm run prepack` itself fails with some other error, the cleanest fallback is to install Z2M from the latest tagged release rather than the bleeding-edge `main` branch we cloned. Let's see if it works first — if it doesn't, we have a clear plan B.
 
 
 
