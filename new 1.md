@@ -1,3 +1,105 @@
+Now I can see exactly what happened. The error is specific and well-documented.
+
+## What killed Z2M
+
+Read these key lines from your screenshots:
+
+**Image 1:**
+- `EZSP started ✓` — Z2M connected to the SLZB-06 successfully
+- `Adapter version info: ... build:397, type:170 ✓` — handshake OK
+- `[STACK STATUS] Network up. ✓`
+- `zh:ember: [EzspConfigId]` — starting to configure
+
+**Image 2:**
+- `tatus=INVALID_STATE. Firmware value will be used instead`
+- **`error: z2m: Error: [INIT TC] Failed network init request with status=INVALID_STATE`**
+- `Error while starting zigbee-herdsman`
+- `Failed to start zigbee-herdsman`
+- `Exiting...`
+
+So Z2M reached the SLZB-06, started initializing the Zigbee network on it, and got `INVALID_STATE` from the EmberZNet firmware. Z2M correctly bails out rather than corrupting your Zigbee network.
+
+## What `INVALID_STATE` means here
+
+This is a known issue specific to the SLZB-06 + EmberZNet adapter that happens when **Z2M starts before the SLZB-06 is fully ready**. The SLZB-06 is on Ethernet — when the phone reboots, the SLZB-06 isn't necessarily reset. But your boot script's TCP connection to the SLZB-06 raced ahead of the SLZB-06's internal state being clean.
+
+The "INVALID_STATE" specifically means the Zigbee network coordinator on the SLZB-06 is in a state Z2M can't safely initialize from. The Z2M docs explicitly link to a troubleshooting page for this in the error itself: `https://www.zigbee2mqtt.io/guide/installation/20_zigbee2mqtt-fails-to-start_crashes-runtime.html`
+
+## Three fixes, in order of preference
+
+### Fix 1 (try first) — Reboot the SLZB-06
+
+This clears its internal state. From any browser, go to `http://192.168.1.126`, scroll to the bottom of the dashboard, click **Reboot**. Wait 30 seconds for it to come back.
+
+Then start Z2M manually and see if it works:
+
+```bash
+proot-distro login ubuntu
+pgrep mosquitto >/dev/null || mosquitto -c /etc/mosquitto/mosquitto.conf -d
+sleep 3
+cd /opt/zigbee2mqtt
+npm start
+```
+
+(Run in foreground first so we can see any error.)
+
+If it now logs `Started Zigbee2MQTT` cleanly → SLZB-06 reboot fixed it. Then Ctrl+C, restart it as a background process:
+
+```bash
+nohup npm start > /tmp/z2m.log 2>&1 &
+disown
+```
+
+### Fix 2 — Add a longer wait + SLZB-06 health check to the boot script
+
+The real fix is making the boot script wait until the SLZB-06's TCP socket is actually ready and not stuck in some half-state. Once Fix 1 confirms manual start works, we'll modify `~/.termux/boot/start-smarthome.sh` to wait for the SLZB-06 to respond cleanly before launching Z2M.
+
+I want to do this in a follow-up — let's first confirm Fix 1 actually solves your immediate problem.
+
+### Fix 3 (only if Fixes 1 and 2 fail) — Restore Z2M from coordinator backup
+
+Z2M keeps a `coordinator_backup.json` from the last successful run. If the network state in that file matches the SLZB-06's state, restart works clean. If they've diverged (e.g., from previous failed attempts), the backup can fix it. This is a more invasive recovery and we'd only do it if the easier fixes don't work.
+
+---
+
+## Do this now
+
+1. Open `http://192.168.1.126` in your browser
+2. Scroll to the bottom, click **Reboot**
+3. Wait 30 seconds
+4. In Termux, run the four commands from Fix 1 above
+5. Watch the `npm start` output in your terminal
+
+Tell me what you see. Specifically: does Z2M now log `Started Zigbee2MQTT`, or does it still crash with `INVALID_STATE`?
+
+If it works → great, run the `nohup` background restart, verify `http://192.168.1.125:8080` loads, and then we'll tackle the boot script's race condition.
+
+If it crashes with the same error → screenshot it, we'll go to Fix 3.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 So the boot script started HA but didn't successfully start Z2M. That tells us specifically that the proot-launching part of the script isn't working as intended after a real reboot.
 
 Let me get diagnostics first, then we'll fix what's actually wrong.
