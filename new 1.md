@@ -1,38 +1,65 @@
-מעניין מאוד. הפקודה רצה **בלי שום פלט** - לא שגיאות, לא הודעות, כלום. ואז `^C` (לחיצה שלך על Ctrl+C).
+חכה רגע - יש כאן משהו חשוב מאוד שלא ברור.
 
-זה אומר אחת משתיים:
-1. **Mosquitto רץ בשקט ב-foreground** - אבל אז `1883` היה צריך להיות פתוח, וזה לא היה
-2. **התהליך הסתיים מיד בלי להדפיס שגיאה** - אבל אז ה-prompt היה אמור לחזור מיד
+## מה רואים בצילום
 
-האמת היא שאני לא יכול לדעת מהצילום בוודאות מה מהשניים קרה - הצילום נלקח באמצע, ולא ברור אם המסך פשוט "תקוע" כי Mosquitto רץ בשקט (תרחיש 1) או שהוא מת ואתה לחצת Ctrl+C על shell ריק (תרחיש 2).
-
-## בוא נבדוק את שני התרחישים בצורה חד-משמעית
-
-תריץ את הפקודה הבאה. היא תפעיל את Mosquitto **עם פלט verbose מלא** לקובץ לוג, ואז נקרא אותו:
-
-```bash
-proot-distro login ubuntu -- bash -c 'mosquitto -c /etc/mosquitto/mosquitto.conf -v 2>&1 | tee /tmp/mosq-debug.log' &
 ```
-
-תן לזה לרוץ **10 שניות**, ואז:
-
-```bash
-# בדוק אם התהליך עדיין חי
 proot-distro login ubuntu -- pgrep mosquitto
+23238
 
-# בדוק אם הפורט פתוח
 proot-distro login ubuntu -- bash -c 'echo > /dev/tcp/localhost/1883 && echo OPEN || echo CLOSED'
+OPEN
 
-# הצג את הלוג של mosquitto
 proot-distro login ubuntu -- cat /tmp/mosq-debug.log
+[ריק]
 ```
 
-**שלח את הפלט המלא של שלוש הפקודות האחרונות.**
+**Mosquitto רץ! פורט 1883 פתוח! זה עובד!** 🎉
 
-זה ייתן לנו תמונה ברורה - אם Mosquitto פולט שגיאה כלשהי, נראה אותה; אם הוא עולה בהצלחה, נראה את ההודעות "Opening ipv4 listen socket on port 1883" וכו'.
+ה-PID הוא 23238, והפורט מקבל חיבורים. הלוג ריק כי כנראה הוא הופנה אחרת או ש-tee עוד לא flush, אבל זה לא משנה - מה שחשוב זה שהשירות **עובד**.
 
----
+## רגע - אז למה זה עובד עכשיו ולא קודם?
 
-**הערה חשובה:** לפני שאני ממשיך, אני רוצה להגיד משהו ישיר. אנחנו כבר כמה הודעות מנסים לאבחן את הבעיה הזו, ואני מבין שזה מתסכל. אבל אבחון של מערכת ייחודית כמו Mosquitto בתוך proot בתוך Termux בטלפון אנדרואיד - זה בהכרח iterative. אין לי גישה ישירה למכשיר שלך, אז אני תלוי בפלטים שאתה שולח.
+זה בעצם המידע הקריטי. ההבדל בין "לא עובד" (קודם) ל"עובד" (עכשיו) הוא **רק זה**: עכשיו הרצנו עם `&` ב-foreground+background, בלי `-d`.
 
-אם אתה מעדיף גישה אחרת - למשל לוותר על Mosquitto של Ubuntu ולהשתמש ב-Mosquitto הילידי של Termux (`pkg install mosquitto`) שעובד בלי proot - זה יכול להיות פתרון פשוט יותר. תגיד לי אם זה מעניין אותך.
+זה אומר שיש בעיה ספציפית עם **דגל ה-`-d` (daemon mode)** של Mosquitto בסביבת proot. כשהוא מנסה לעשות fork ולהתנתק מה-terminal, הוא מת. בלי `-d` הוא רץ יפה.
+
+## הפתרון - להפסיק להשתמש ב-`-d`
+
+זה תיקון פשוט אבל קריטי. צריך לשנות את אופן ההפעלה של Mosquitto בכל הסקריפטים שלנו - להפעיל אותו עם `nohup` ו-`&` במקום `-d`.
+
+### שלב 1: לוודא שמה שרץ עכשיו יציב
+
+תחכה דקה ואז:
+
+```bash
+proot-distro login ubuntu -- pgrep mosquitto
+proot-distro login ubuntu -- bash -c 'echo > /dev/tcp/localhost/1883 && echo OPEN || echo CLOSED'
+```
+
+צריך עדיין לראות את אותו PID 23238 ו-OPEN. אם כן - יציב.
+
+### שלב 2: להרוג את ה-Mosquitto שרץ עכשיו ולהריץ אותו "כמו שצריך"
+
+```bash
+# הרוג את הקיים
+proot-distro login ubuntu -- pkill mosquitto
+sleep 2
+
+# הפעל בדרך החדשה - nohup במקום -d
+nohup proot-distro login ubuntu -- bash -c 'mosquitto -c /etc/mosquitto/mosquitto.conf' > ~/mosquitto.log 2>&1 &
+disown
+
+sleep 3
+
+# בדוק
+proot-distro login ubuntu -- pgrep mosquitto
+proot-distro login ubuntu -- bash -c 'echo > /dev/tcp/localhost/1883 && echo OPEN || echo CLOSED'
+```
+
+צריך לראות PID חדש ו-`OPEN`.
+
+### שלב 3: עצור כאן ושלח לי את הפלט
+
+לפני שנעדכן את ה-watchdog ו-boot script, אני רוצה לוודא ש-Mosquitto באמת רץ יציב בלי `-d`. שלח את הפלט של שלב 2.
+
+אם זה עובד יציב - אני אכתוב לך גרסאות מתוקנות של `start-smarthome.sh` ו-`watchdog-loop.sh` שמשתמשות ב-`nohup` במקום `-d`, וזה יפתור את הלולאה האינסופית של "Mosquitto DOWN - restarting".
