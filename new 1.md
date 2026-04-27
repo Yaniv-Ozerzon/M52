@@ -1,63 +1,79 @@
-Found it — the actual error. This is a real, fixable problem.
-
-## What the error says
+Now we have a clear answer. The Z2M log shows the real problem:
 
 ```
-Error loading /data/data/com.termux/files/home/hass-config/configuration.yaml:
-in "/data/data/com.termux/files/home/hass-config/configuration.yaml", line 11, column 9:
-Unable to read file /data/data/com.termux/files/home/hass-config/scripts.yaml
+z2m: Not connected to MQTT server!
+z2m: MQTT error:
 ```
 
-Translated: line 11 of your `configuration.yaml` says "load `scripts.yaml`" — but **`scripts.yaml` doesn't exist** on disk. HA refuses to load *any* config when one referenced file is missing, including all your automations. That's why the automations never appear in the UI even though `automations.yaml` is fine.
+**Z2M can't reach Mosquitto.** Every 9 seconds it tries to connect, fails, and tries again. The sensor isn't the problem — the sensor's data has nowhere to go because the MQTT broker that should be relaying it to HA isn't responding.
 
-This was almost certainly caused by the earlier troubleshooting suggestion to add three include lines (`automation:`, `script:`, `scene:`) — but the matching files were never created.
+This explains everything: HA shows the sensor as "unavailable" because no MQTT messages are flowing. Z2M is publishing into the void.
 
-## The fix — create the missing files
+## What likely happened
 
-In Termux (regular Termux, `~ $` prompt):
+After the recent restart sequence (HA restart, possibly the phone reboot), **Mosquitto didn't come back up.** Or it crashed. Z2M and HA each manage their own MQTT connections, so they reconnect independently — but if the broker itself is down, neither can connect.
+
+## Step 1 — Check if Mosquitto is running
+
+In Termux, enter the Debian container:
 
 ```bash
-echo "[]" > ~/hass-config/scripts.yaml
-echo "[]" > ~/hass-config/scenes.yaml
+proot-distro login ubuntu
 ```
 
-The `[]` is YAML for "empty list" — meaning no scripts and no scenes are defined yet, but the files exist for HA to read. This satisfies the include statements without adding any actual content.
-
-Verify the files exist now:
+Then check:
 
 ```bash
-ls -la ~/hass-config/*.yaml
+ps aux | grep mosquitto | grep -v grep
 ```
 
-You should see at least: `automations.yaml`, `configuration.yaml`, `scenes.yaml`, `scripts.yaml`.
+**Expected output:** one line showing `mosquitto -c /etc/mosquitto/mosquitto.conf -d`
 
-## Re-run the configuration check
+**If output is empty** — Mosquitto is dead. That's the cause.
 
-Back in the HA web UI:
+## Step 2 — Start Mosquitto
 
-1. **Settings → System → Restart** (or wherever the "Check and restart" panel was)
-2. Click **Check configuration** again
+If it's not running:
 
-This time it should say **"Configuration valid!"** in green.
+```bash
+mosquitto -c /etc/mosquitto/mosquitto.conf -d
+```
 
-## Then restart HA
+Then verify:
 
-1. Click **Restart** (the button next to Check configuration — it'll now be active since config is valid)
-2. Wait 60–90 seconds. The browser may show a "Lost connection" message during the restart — that's normal.
-3. The page reconnects automatically when HA is back
+```bash
+ps aux | grep mosquitto | grep -v grep
+```
 
-## After the restart
+You should see one Mosquitto process now.
 
-Go to **Settings → Automations & scenes**. All your "failed" automations should now appear in the list — they were never broken, HA was just refusing to load anything because of the missing scripts.yaml.
+Quick auth test to make sure it works:
 
-Then:
-1. Identify duplicates (you probably have 3–5 copies of the water leak automation)
-2. Delete all but one
-3. Click into the surviving one → ⋮ menu → **Run**
-4. Check your MI 8 for the notification
+```bash
+mosquitto_pub -h localhost -u ozerzon -P 'Passmein@1' -t test -m hello && echo OK || echo FAILED
+```
 
----
+You should see `OK`.
 
-This is genuinely the cause of all the timeout dialogs. The editor was saving fine, but HA couldn't load the saved automations because of the broken include reference, so the editor's "wait for it to be active" check kept failing. Once you fix the missing files and restart, everything should snap into place.
+## Step 3 — Watch Z2M reconnect
 
-Run the two `echo` commands and the restart sequence, then tell me what's in the automations list.
+Switch to your browser tab with the Z2M log page. Within 10 seconds of Mosquitto starting, you should see:
+
+```
+info: z2m: Connected to MQTT server
+info: z2m: ... (normal operation messages)
+```
+
+The red errors will stop appearing.
+
+## Step 4 — HA reconnects automatically
+
+HA polls MQTT every few seconds. Within 30 seconds of Mosquitto being back, your sensor's "unavailable" state should resolve to either "Wet" or "Dry" — assuming the sensor has reported anything in the meantime.
+
+If the sensor still shows "Unavailable" after Mosquitto is back: touch a wet finger to it. The sensor publishes a state change → Mosquitto relays it → HA picks it up.
+
+## Why this matters for your auto-start setup
+
+This tells us your boot script almost certainly didn't actually launch Mosquitto on the last boot — same bug as before, or a regression. After we get this working again, we should look at the boot script behavior, because if Mosquitto dies again it'll keep happening.
+
+For right now: just get Mosquitto back up. Run Step 1 first and tell me what the `ps aux` shows.
