@@ -1,65 +1,151 @@
-חכה רגע - יש כאן משהו חשוב מאוד שלא ברור.
+מצוין! עובד! 🎉
 
-## מה רואים בצילום
+## מה רואים
 
 ```
-proot-distro login ubuntu -- pgrep mosquitto
-23238
-
-proot-distro login ubuntu -- bash -c 'echo > /dev/tcp/localhost/1883 && echo OPEN || echo CLOSED'
+pgrep mosquitto
+25181
+25375
 OPEN
-
-proot-distro login ubuntu -- cat /tmp/mosq-debug.log
-[ריק]
 ```
 
-**Mosquitto רץ! פורט 1883 פתוח! זה עובד!** 🎉
+Mosquitto רץ עם 2 PIDs (זה תקין - אחד ראשי ואחד של ה-listener) ופורט 1883 פתוח. הפלט `[1]+ Done` הוא פשוט הודעה שה-job הקודם של `tee` הסתיים, זה לא רלוונטי.
 
-ה-PID הוא 23238, והפורט מקבל חיבורים. הלוג ריק כי כנראה הוא הופנה אחרת או ש-tee עוד לא flush, אבל זה לא משנה - מה שחשוב זה שהשירות **עובד**.
+**אנחנו יכולים לסמוך על זה - Mosquitto יציב כשמפעילים אותו בלי `-d`.**
 
-## רגע - אז למה זה עובד עכשיו ולא קודם?
+## עכשיו - לתקן את הסקריפטים פעם אחת ולתמיד
 
-זה בעצם המידע הקריטי. ההבדל בין "לא עובד" (קודם) ל"עובד" (עכשיו) הוא **רק זה**: עכשיו הרצנו עם `&` ב-foreground+background, בלי `-d`.
+יש לנו שני סקריפטים שצריך לעדכן: `start-smarthome.sh` ו-`watchdog-loop.sh`. בואו נטפל בהם.
 
-זה אומר שיש בעיה ספציפית עם **דגל ה-`-d` (daemon mode)** של Mosquitto בסביבת proot. כשהוא מנסה לעשות fork ולהתנתק מה-terminal, הוא מת. בלי `-d` הוא רץ יפה.
-
-## הפתרון - להפסיק להשתמש ב-`-d`
-
-זה תיקון פשוט אבל קריטי. צריך לשנות את אופן ההפעלה של Mosquitto בכל הסקריפטים שלנו - להפעיל אותו עם `nohup` ו-`&` במקום `-d`.
-
-### שלב 1: לוודא שמה שרץ עכשיו יציב
-
-תחכה דקה ואז:
+### שלב 1: לעדכן את watchdog-loop.sh
 
 ```bash
-proot-distro login ubuntu -- pgrep mosquitto
-proot-distro login ubuntu -- bash -c 'echo > /dev/tcp/localhost/1883 && echo OPEN || echo CLOSED'
+nano ~/watchdog-loop.sh
 ```
 
-צריך עדיין לראות את אותו PID 23238 ו-OPEN. אם כן - יציב.
-
-### שלב 2: להרוג את ה-Mosquitto שרץ עכשיו ולהריץ אותו "כמו שצריך"
+מחק הכל (החזק את החץ למטה עד הסוף, ואז `Ctrl+K` עד שהקובץ ריק) והדבק:
 
 ```bash
-# הרוג את הקיים
-proot-distro login ubuntu -- pkill mosquitto
-sleep 2
+#!/data/data/com.termux/files/usr/bin/bash
+# Watchdog: checks Mosquitto, Z2M, and HA every 5 minutes
+# Restarts whatever's dead, in correct dependency order
+# Logs to ~/watchdog.log
 
-# הפעל בדרך החדשה - nohup במקום -d
-nohup proot-distro login ubuntu -- bash -c 'mosquitto -c /etc/mosquitto/mosquitto.conf' > ~/mosquitto.log 2>&1 &
+LOGFILE=~/watchdog.log
+
+log() {
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOGFILE"
+}
+
+# Wait for Mosquitto to actually accept connections on port 1883
+wait_for_mosquitto() {
+  local max=30
+  local i=0
+  while [ $i -lt $max ]; do
+    if proot-distro login ubuntu -- bash -c 'echo > /dev/tcp/localhost/1883' 2>/dev/null; then
+      return 0
+    fi
+    sleep 1
+    i=$((i+1))
+  done
+  return 1
+}
+
+log "Watchdog loop started"
+
+while true; do
+
+  # --- Mosquitto FIRST (Z2M depends on it) ---
+  MOSQ_RESTARTED=0
+  if ! proot-distro login ubuntu -- pgrep mosquitto >/dev/null 2>&1; then
+    log "Mosquitto DOWN - restarting"
+    nohup proot-distro login ubuntu -- bash -c 'mosquitto -c /etc/mosquitto/mosquitto.conf' >> ~/mosquitto.log 2>&1 &
+    disown
+    MOSQ_RESTARTED=1
+    if wait_for_mosquitto; then
+      log "Mosquitto accepting connections on 1883"
+    else
+      log "WARNING: Mosquitto restarted but port 1883 not responding after 30s"
+    fi
+  fi
+
+  # --- Zigbee2MQTT (after Mosquitto is confirmed up) ---
+  Z2M_ALIVE=0
+  if proot-distro login ubuntu -- pgrep -f "node.*index.js" >/dev/null 2>&1; then
+    Z2M_ALIVE=1
+  fi
+
+  # If Mosquitto was just restarted, force Z2M restart too (its connection is dead)
+  if [ $MOSQ_RESTARTED -eq 1 ] && [ $Z2M_ALIVE -eq 1 ]; then
+    log "Mosquitto was restarted - killing stale Z2M to force reconnect"
+    proot-distro login ubuntu -- pkill -f "node.*index.js" 2>/dev/null
+    sleep 3
+    Z2M_ALIVE=0
+  fi
+
+  if [ $Z2M_ALIVE -eq 0 ]; then
+    log "Zigbee2MQTT DOWN - restarting"
+    nohup proot-distro login ubuntu -- bash -c '
+      cd /opt/zigbee2mqtt
+      exec npm start
+    ' > ~/z2m-watchdog.log 2>&1 &
+    disown
+    sleep 30
+  fi
+
+  # --- Home Assistant ---
+  if ! pgrep -f "homeassistant" >/dev/null 2>&1; then
+    log "Home Assistant DOWN - restarting"
+    nohup bash ~/start-homeassistant.sh > ~/hass-watchdog.log 2>&1 &
+    disown
+    sleep 30
+  fi
+
+  # --- Trim log if it grows too large ---
+  if [ -f "$LOGFILE" ] && [ "$(wc -l < "$LOGFILE")" -gt 1000 ]; then
+    tail -500 "$LOGFILE" > "$LOGFILE.tmp" && mv "$LOGFILE.tmp" "$LOGFILE"
+  fi
+
+  sleep 300
+done
+```
+
+שמור: `Ctrl+O`, Enter, `Ctrl+X`.
+
+ההבדל היחיד מהקודם: **שורת ההפעלה של Mosquitto** -- במקום `mosquitto -c ... -d`, עכשיו `nohup ... mosquitto -c ... &; disown`.
+
+### שלב 2: לעדכן את start-smarthome.sh
+
+```bash
+nano ~/.termux/boot/start-smarthome.sh
+```
+
+חפש את השורה שמפעילה את Mosquitto (היא נראית בערך כך):
+```bash
+proot-distro login ubuntu -- bash -c 'mosquitto -c /etc/mosquitto/mosquitto.conf -d'
+```
+
+החלף אותה ב:
+```bash
+nohup proot-distro login ubuntu -- bash -c 'mosquitto -c /etc/mosquitto/mosquitto.conf' >> ~/mosquitto.log 2>&1 &
 disown
-
-sleep 3
-
-# בדוק
-proot-distro login ubuntu -- pgrep mosquitto
-proot-distro login ubuntu -- bash -c 'echo > /dev/tcp/localhost/1883 && echo OPEN || echo CLOSED'
+sleep 5
 ```
 
-צריך לראות PID חדש ו-`OPEN`.
+שמור: `Ctrl+O`, Enter, `Ctrl+X`.
 
-### שלב 3: עצור כאן ושלח לי את הפלט
+### שלב 3: עכשיו - אתחל את הטלפון
 
-לפני שנעדכן את ה-watchdog ו-boot script, אני רוצה לוודא ש-Mosquitto באמת רץ יציב בלי `-d`. שלח את הפלט של שלב 2.
+זה הזמן הנכון לאתחל. כל השירותים יעלו עם הסקריפטים המתוקנים.
 
-אם זה עובד יציב - אני אכתוב לך גרסאות מתוקנות של `start-smarthome.sh` ו-`watchdog-loop.sh` שמשתמשות ב-`nohup` במקום `-d`, וזה יפתור את הלולאה האינסופית של "Mosquitto DOWN - restarting".
+### שלב 4: אחרי האתחול, חכה 10 דקות ושלח לי
+
+```bash
+tail -20 ~/watchdog.log
+proot-distro login ubuntu -- pgrep mosquitto && echo MOSQ_UP || echo MOSQ_DOWN
+proot-distro login ubuntu -- bash -c 'echo > /dev/tcp/localhost/1883' 2>/dev/null && echo "1883 OPEN" || echo "1883 CLOSED"
+proot-distro login ubuntu -- pgrep -f "node.*index.js" && echo Z2M_UP || echo Z2M_DOWN
+pgrep -f homeassistant && echo HA_UP || echo HA_DOWN
+```
+
+מה שאני מצפה לראות ב-watchdog.log: **"Watchdog loop started"** ו**שום הודעות "DOWN - restarting"**. אם הכל יציב, זה אמור להיות לוג שקט מאוד.
