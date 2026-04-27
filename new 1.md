@@ -1,3 +1,122 @@
+That's expected behavior — but I should have warned you about it. The command isn't hung, it's just silent.
+
+## What's happening
+
+`termux-job-scheduler` doesn't print confirmation when you schedule a job. It registers the job with Android's JobScheduler service and exits silently. So you're sitting at a blank line waiting for output that will never come.
+
+Two scenarios — let's figure out which:
+
+### Scenario 1 (most likely) — already done, just sitting there
+
+If the cursor is just blinking and you can press Enter to get a new prompt, the command finished successfully. Try pressing **Enter** once. You should get a fresh `~ $` prompt back.
+
+### Scenario 2 — Termux:API app isn't installed yet
+
+The `termux-api` Termux package was just installed (visible in your screenshot), but `termux-job-scheduler` also needs the **Termux:API Android app** to be installed and opened at least once. Without that companion app, the command can hang forever waiting to talk to a service that doesn't exist.
+
+## Step 1 — Press Ctrl+C to abort the hung command
+
+If pressing Enter doesn't give you a prompt, force-kill the command:
+
+```
+Ctrl+C
+```
+
+You should be back at `~ $`.
+
+## Step 2 — Check if Termux:API app is installed
+
+On your phone, look in your app drawer for an app called **Termux:API**. If you don't have it:
+
+1. Open F-Droid
+2. Search for **Termux:API**
+3. Install it (publisher: Fredrik Fornwall)
+4. **Open the app once** — the screen will be mostly empty, that's fine. Just opening it grants Android the permission for the package to talk to its companion app.
+5. Close it
+
+## Step 3 — Verify Termux:API works
+
+Back in Termux:
+
+```bash
+termux-battery-status
+```
+
+If Termux:API is properly set up, this returns JSON with battery info (percentage, charging state, etc.). It's a quick test that the API bridge works.
+
+If it hangs or returns "command not found" or "API service not responding," the app isn't set up correctly. Reinstall and re-open it.
+
+## Step 4 — Schedule the watchdog (now it should return immediately)
+
+```bash
+termux-job-scheduler --period-ms 300000 --persisted true --script ~/watchdog.sh
+```
+
+You should get the prompt back within 1–2 seconds.
+
+Verify it's scheduled:
+
+```bash
+termux-job-scheduler --pending
+```
+
+This should print info about the pending job, including the script path.
+
+---
+
+## If you're stuck and don't want to deal with Termux:API
+
+Honestly, the watchdog is useful but not essential. There's a simpler alternative — run the watchdog as a background loop that checks every 5 minutes, started by the boot script:
+
+```bash
+nano ~/watchdog-loop.sh
+```
+
+Paste:
+
+```bash
+#!/data/data/com.termux/files/usr/bin/bash
+while true; do
+  bash ~/watchdog.sh
+  sleep 300
+done
+```
+
+Save, make executable:
+
+```bash
+chmod +x ~/watchdog-loop.sh
+```
+
+Then add this line to the END of `~/.termux/boot/start-smarthome.sh` (just before the final `echo "=== Boot script finished..."`):
+
+```bash
+nohup bash ~/watchdog-loop.sh > ~/watchdog-loop.log 2>&1 &
+disown
+```
+
+This avoids termux-job-scheduler and Termux:API entirely. The boot script kicks off an infinite-loop watchdog that runs every 5 minutes for as long as Termux is alive. It's slightly less robust (if Termux dies, the watchdog dies too), but for our use case where the boot script *is* what brings everything up, that's actually fine.
+
+---
+
+Press Ctrl+C to clear the hung command, then tell me whether you want to install Termux:API or use the simpler loop approach. I'd lean toward the loop approach honestly — fewer moving parts, easier to debug.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 Good call. Let's make this resilient.
 
 Two pieces:
