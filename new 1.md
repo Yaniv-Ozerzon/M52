@@ -1,79 +1,107 @@
-Now we have a clear answer. The Z2M log shows the real problem:
+Looking at the screenshots, I can decode what happened. Both contain real information.
+
+## Image 1 — what the Termux output tells us
+
+You ran the right commands. Reading carefully:
 
 ```
-z2m: Not connected to MQTT server!
-z2m: MQTT error:
+ps aux | grep mosquitto | grep -v grep
+[empty - mosquitto NOT running]
+
+mosquitto -c /etc/mosquitto/mosquitto.conf -d
+[no error - started]
+
+ps aux | grep mosquitto | grep -v grep
+u0_a166  5018  0.3  0.0  15228  2392  S<s  ...  mosquitto -c /etc/mosquitto/mosquitto.conf -d
+[mosquitto IS now running ✓]
+
+mosquitto_pub -h localhost -u ozerzon -P 'Passmein@1' -t test -m hello && echo OK || echo FAILED
+OK ✓
+
+info: z2m: Connected to MQTT server
+info: z2m: ... (normal operation messages)
+bash: info:: command not found
+bash: syntax error near unexpected token '('
 ```
 
-**Z2M can't reach Mosquitto.** Every 9 seconds it tries to connect, fails, and tries again. The sensor isn't the problem — the sensor's data has nowhere to go because the MQTT broker that should be relaying it to HA isn't responding.
+So:
+- Mosquitto was dead → you started it ✓
+- Auth test passed ✓
+- **Z2M reconnected to MQTT** — that's the line `info: z2m: Connected to MQTT server`
 
-This explains everything: HA shows the sensor as "unavailable" because no MQTT messages are flowing. Z2M is publishing into the void.
+The two error lines at the bottom (`info:: command not found` and `syntax error near...`) are because you accidentally typed Z2M's expected log lines as if they were shell commands. Harmless — bash just complained about not knowing how to run them. Z2M itself is fine; the connect happened in its own log, not in your terminal.
+
+## Image 2 — Z2M frontend can't be reached
+
+`192.168.1.125:8080` refused to connect. This is **a separate problem** — Z2M may have died or is restarting.
 
 ## What likely happened
 
-After the recent restart sequence (HA restart, possibly the phone reboot), **Mosquitto didn't come back up.** Or it crashed. Z2M and HA each manage their own MQTT connections, so they reconnect independently — but if the broker itself is down, neither can connect.
+The Z2M process I helped you start way back in our conversation was running in a foreground Termux session. If that session got killed (Termux closed, OS reclaimed it, you opened too many sessions and one was dropped), Z2M dies with it. Mosquitto we started as a daemon (`-d` flag), so it stays in the background. Z2M was running in the foreground.
 
-## Step 1 — Check if Mosquitto is running
+The "Connected to MQTT server" log line you saw was from a Z2M instance that no longer exists — it was the last gasp before whatever killed it took it down, OR it's an old log line scrolled into view.
 
-In Termux, enter the Debian container:
+## Step 1 — Check if Z2M is actually running
 
-```bash
-proot-distro login ubuntu
-```
-
-Then check:
+Inside the Debian container:
 
 ```bash
-ps aux | grep mosquitto | grep -v grep
+ps aux | grep -E "node|zigbee" | grep -v grep
 ```
 
-**Expected output:** one line showing `mosquitto -c /etc/mosquitto/mosquitto.conf -d`
+**Expected:** one or two lines mentioning `node index.js` or `zigbee2mqtt`.
 
-**If output is empty** — Mosquitto is dead. That's the cause.
+**If empty** → Z2M is dead and we need to restart it.
 
-## Step 2 — Start Mosquitto
+## Step 2 — Restart Z2M
 
-If it's not running:
+If dead, restart it. From inside Debian (`root@localhost:~#` prompt):
 
 ```bash
-mosquitto -c /etc/mosquitto/mosquitto.conf -d
+cd /opt/zigbee2mqtt
+nohup npm start > /tmp/z2m.log 2>&1 &
+disown
 ```
 
-Then verify:
+What this does:
+- `nohup` — keeps it running even if Termux session closes
+- `> /tmp/z2m.log 2>&1` — redirects all output to a log file (so it doesn't fill your terminal)
+- `&` — runs in background
+- `disown` — detaches it from the shell so it survives shell exit
+
+Wait 30 seconds for Z2M to start up.
+
+## Step 3 — Verify Z2M started
 
 ```bash
-ps aux | grep mosquitto | grep -v grep
+ps aux | grep "node index.js" | grep -v grep
 ```
 
-You should see one Mosquitto process now.
+You should see a `node index.js` process.
 
-Quick auth test to make sure it works:
+Also tail its log:
 
 ```bash
-mosquitto_pub -h localhost -u ozerzon -P 'Passmein@1' -t test -m hello && echo OK || echo FAILED
+tail -20 /tmp/z2m.log
 ```
 
-You should see `OK`.
+Look for `Started Zigbee2MQTT` near the end.
 
-## Step 3 — Watch Z2M reconnect
+## Step 4 — Verify the frontend works
 
-Switch to your browser tab with the Z2M log page. Within 10 seconds of Mosquitto starting, you should see:
+In your browser, refresh `http://192.168.1.125:8080`. The Z2M dashboard should now load.
 
-```
-info: z2m: Connected to MQTT server
-info: z2m: ... (normal operation messages)
-```
+## Step 5 — Wake the sensor
 
-The red errors will stop appearing.
+Once Z2M is up, touch a wet finger to the sensor's contacts. Watch the Z2M log on the frontend's Logs page — you should see a publish message. Then check HA — the sensor should change from "Unavailable" to "Wet" then "Dry" within seconds.
 
-## Step 4 — HA reconnects automatically
+---
 
-HA polls MQTT every few seconds. Within 30 seconds of Mosquitto being back, your sensor's "unavailable" state should resolve to either "Wet" or "Dry" — assuming the sensor has reported anything in the meantime.
+## Honest concern about this pattern
 
-If the sensor still shows "Unavailable" after Mosquitto is back: touch a wet finger to it. The sensor publishes a state change → Mosquitto relays it → HA picks it up.
+This is the second time Mosquitto and/or Z2M have died unexpectedly. Two failures in one session points to a real problem with how they're being kept alive. Once we get this stable, we should:
 
-## Why this matters for your auto-start setup
+1. **Look at your boot script** — verify it actually launches both services using `nohup` correctly so they survive Termux being closed
+2. **Add a watchdog** — a small script that checks every 5 minutes whether Mosquitto and Z2M are alive, and restarts them if not. This is what production servers do, and on a phone it's especially valuable.
 
-This tells us your boot script almost certainly didn't actually launch Mosquitto on the last boot — same bug as before, or a regression. After we get this working again, we should look at the boot script behavior, because if Mosquitto dies again it'll keep happening.
-
-For right now: just get Mosquitto back up. Run Step 1 first and tell me what the `ps aux` shows.
+But first — get them running again. Do Steps 1–5 and tell me what you see in Step 3 (`ps aux` output and `tail` of the log).
