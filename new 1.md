@@ -1,118 +1,46 @@
-Let's get Z2M running manually. Step by step. I'll keep it minimal so we can see exactly what fails if anything does.
+טוב — אז המצב כרגע: HA עלה אוטומטית, אבל Mosquitto ו-Z2M לא עלו אחרי הריבוט. נסתכל מה קרה ונתקן.
 
-## Step 1 — Check what's already running
+## שלב 1 — בוא נראה מה הסקריפט בפועל עשה כשהפלאפון עלה
 
-In Termux (regular Termux, `~ $` prompt):
+ב-Termux רגיל (פרומפט `~ $`):
+
+```bash
+echo "=== boot-startup.log ==="
+cat ~/boot-startup.log
+
+echo ""
+echo "=== watchdog.log (last 20 lines) ==="
+tail -20 ~/watchdog.log
+
+echo ""
+echo "=== watchdog process check ==="
+ps aux | grep watchdog | grep -v grep
+```
+
+תשלח לי את הפלט. שלוש אפשרויות עיקריות שאני רוצה לאשר/לפסול:
+
+**אפשרות א' — סקריפט הבוט בכלל לא רץ:**
+אם `boot-startup.log` ריק או מהריצה הקודמת (timestamp ישן) → Termux:Boot לא הפעיל את הסקריפט אחרי הריבוט. אנדרואיד הרג אותו.
+
+**אפשרות ב' — הסקריפט רץ, אבל נכשל במקום מסויים:**
+אם `boot-startup.log` מראה רק חלק מההודעות (למשל "Network wait done" אבל לא "Boot script finished") → הסקריפט רץ אבל נתקע. ה-log יראה איפה.
+
+**אפשרות ג' — הסקריפט רץ במלואו, אבל ה-watchdog לא הופעל:**
+אם הלוג שלם אבל ה-watchdog לא רץ עכשיו (`ps` מחזיר ריק) → ה-watchdog התרסק. השרשרת:
+- סקריפט בוט הפעיל hass + ניסה z2m + הפעיל watchdog
+- אם z2m קרס בגלל INVALID_STATE, ה-watchdog היה אמור להחזיר אותו
+- אבל ה-watchdog עצמו מת, אז שום דבר לא תוקן
+
+## למה אני שואל ולא מנחש
+
+הסקריפט שכתבנו אמור היה לטפל בכל זה (יש ניסיון חוזר ל-Z2M, יש watchdog שמרים שירותים מתים). אם משהו עדיין לא עובד, אני צריך לראות איפה בדיוק שרשרת ההפעלה נשברה. תיקון לעיוור הוא איך שמגיעים לעוד סיבוב.
+
+## בנוסף, בוא נוודא שמה שרץ עכשיו באמת רץ נכון
 
 ```bash
 proot-distro login ubuntu -- bash -c "ps aux | grep -E 'mosquitto|node' | grep -v grep"
 ```
 
-Send me the output, but you can keep going while waiting for me. The output will tell us:
-- If Mosquitto is running (we want this to be running)
-- If Z2M is running (probably not, since 8080 is down)
+צריך לראות שני תהליכים: mosquitto ו-node index.js. אם הם שם, מצוין — מה שעשית ידנית הצליח.
 
-## Step 2 — Reboot the SLZB-06 (clears INVALID_STATE risk)
-
-In your browser: `http://192.168.1.126` → scroll to **Reboot** button → click it. **Wait 45 seconds** before continuing. This is the same step that fixed it last time after a phone reboot.
-
-## Step 3 — Enter the Debian container
-
-In Termux:
-
-```bash
-proot-distro login ubuntu
-```
-
-Wait for the prompt to change to `root@localhost:~#`. From here on, everything runs **inside Debian**.
-
-## Step 4 — Make sure Mosquitto is running
-
-```bash
-pgrep mosquitto >/dev/null && echo "Mosquitto running" || echo "Mosquitto DOWN"
-```
-
-If it says "Mosquitto running" → skip to Step 5.
-
-If it says "Mosquitto DOWN" → start it:
-
-```bash
-mosquitto -c /etc/mosquitto/mosquitto.conf -d
-sleep 3
-pgrep mosquitto && echo "Mosquitto started"
-```
-
-You should see a process ID and "Mosquitto started".
-
-If it doesn't start cleanly, run it in foreground to see the error:
-```bash
-mosquitto -c /etc/mosquitto/mosquitto.conf
-```
-And send me what it prints.
-
-## Step 5 — Start Z2M in the foreground first
-
-We start in foreground so we can see immediately if it crashes (INVALID_STATE etc.):
-
-```bash
-cd /opt/zigbee2mqtt
-npm start
-```
-
-Watch the log scroll. You're looking for:
-
-**Success markers:**
-```
-info: zh:ember: ======== EZSP started ========
-info: zh:ember: [STACK STATUS] Network up.
-info: z2m: zigbee-herdsman started (resumed)
-info: z2m: Connected to MQTT server
-info: z2m: Started Zigbee2MQTT
-```
-
-If you see "Started Zigbee2MQTT" — Z2M is running. **Don't Ctrl+C.** Continue to Step 6.
-
-**Failure markers:**
-- `INVALID_STATE` → SLZB-06 needs reboot again, repeat Step 2 with a longer wait
-- `MQTT failed to connect` → Mosquitto issue, redo Step 4
-- Anything else → screenshot and send
-
-## Step 6 — Verify the frontend works
-
-While Z2M runs in foreground, open `http://192.168.1.125:8080` in a browser. The dashboard should load.
-
-If it loads → Z2M is fully working. Continue to Step 7.
-
-## Step 7 — Move Z2M to background so it survives Termux closing
-
-In the Termux session running Z2M, press **Ctrl+C** to stop it. Then:
-
-```bash
-nohup npm start > /tmp/z2m.log 2>&1 &
-disown
-```
-
-(You should still be inside Debian and in `/opt/zigbee2mqtt` from Step 5.)
-
-Verify it's running:
-
-```bash
-sleep 30
-pgrep -f "node.*index" && echo "Z2M backgrounded successfully"
-```
-
-Should see a PID and "Z2M backgrounded successfully".
-
-Reload `http://192.168.1.125:8080` in browser — should still work.
-
-## Step 8 — Exit Debian
-
-```bash
-exit
-```
-
-You're back in regular Termux. Z2M and Mosquitto keep running because they were properly backgrounded.
-
----
-
-Start with Step 1 — send me what's running. Don't go further until I see the output and confirm. If Mosquitto is dead, we'll handle that before touching Z2M.
+תשלח את שני הפלטים. אז אדע בדיוק מה לתקן ואחזיר תיקון ממוקד במקום לשלוח אותך לעוד סבב של ניסויים.
