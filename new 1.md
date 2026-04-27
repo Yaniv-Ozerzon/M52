@@ -1,70 +1,118 @@
-Mostly good news, but one issue worth fixing. Let me read the screenshot carefully.
+Let's get Z2M running manually. Step by step. I'll keep it minimal so we can see exactly what fails if anything does.
 
-## What works ✓
+## Step 1 — Check what's already running
 
-**Single watchdog running:**
-```
-ps aux | grep watchdog-loop | grep -v grep
-u0_a166  9944  ...  bash /data/data/com.termux/files/home/watchdog-loop.sh
-```
-Just one — clean.
-
-**Watchdog detected Mosquitto crashes:**
-```
-[2026-04-27 09:54:37] Mosquitto DOWN - restarting
-[2026-04-27 09:57:18] Mosquitto DOWN - restarting
-```
-After you killed Mosquitto, the watchdog noticed and tried to restart it. Twice — meaning the first restart didn't stick, but the watchdog kept trying. ✓
-
-## What's NOT working ✗
-
-The critical line:
-```
-$ proot-distro login ubuntu -- pgrep mosquitto
-$ proot-distro login ubuntu -- pgrep mosquitto
-$
-```
-
-Both `pgrep` commands returned nothing. That means **Mosquitto is currently dead** even though the watchdog tried to restart it twice.
-
-Look at the timestamps:
-- 09:54:37 → watchdog tried to restart (failed)
-- 09:57:18 → watchdog tried again (also failed)
-- ~10:00 (now) → still dead
-
-The watchdog's restart command isn't working for some reason.
-
-## Why this is happening — likely cause
-
-Look at the `mosquitto -d` (daemon) command. Inside proot, when Mosquitto starts as a daemon, it forks itself and the parent exits. But sometimes the daemon doesn't get cleaned up properly when killed — it can leave its PID file behind, and a new Mosquitto refuses to start because it thinks one is already running.
-
-## Step 1 — Confirm Mosquitto is really dead
+In Termux (regular Termux, `~ $` prompt):
 
 ```bash
-proot-distro login ubuntu -- bash -c "ps aux | grep mosquitto | grep -v grep"
+proot-distro login ubuntu -- bash -c "ps aux | grep -E 'mosquitto|node' | grep -v grep"
 ```
 
-If empty → confirms it's dead.
+Send me the output, but you can keep going while waiting for me. The output will tell us:
+- If Mosquitto is running (we want this to be running)
+- If Z2M is running (probably not, since 8080 is down)
 
-## Step 2 — Try to start Mosquitto manually with verbose output
+## Step 2 — Reboot the SLZB-06 (clears INVALID_STATE risk)
+
+In your browser: `http://192.168.1.126` → scroll to **Reboot** button → click it. **Wait 45 seconds** before continuing. This is the same step that fixed it last time after a phone reboot.
+
+## Step 3 — Enter the Debian container
+
+In Termux:
 
 ```bash
-proot-distro login ubuntu -- bash -c "mosquitto -c /etc/mosquitto/mosquitto.conf"
+proot-distro login ubuntu
 ```
 
-Note: **no `-d`** this time. Run in foreground so we see any errors. It should print startup messages and either:
-- Hang waiting for connections (good — means it's running) → press Ctrl+C
-- Print an error and exit (bad — that's our clue)
+Wait for the prompt to change to `root@localhost:~#`. From here on, everything runs **inside Debian**.
 
-Send me what it prints. The error will tell us exactly why the daemon-mode start is failing.
+## Step 4 — Make sure Mosquitto is running
 
-## My honest concern
+```bash
+pgrep mosquitto >/dev/null && echo "Mosquitto running" || echo "Mosquitto DOWN"
+```
 
-If Mosquitto won't start cleanly even manually, the watchdog is doing its job (detecting and trying to recover) but the recovery command itself is broken. We'd need to fix the recovery command in the watchdog.
+If it says "Mosquitto running" → skip to Step 5.
 
-Common possibilities:
-1. Stale PID file blocking restart (`/var/run/mosquitto.pid` exists but no process)
-2. Port 1883 still bound by a zombie process
-3. Permissions issue with the password file after Mosquitto's user changed
+If it says "Mosquitto DOWN" → start it:
 
-Run Step 2 and send me the foreground output. We'll see the real reason in the next 30 seconds.
+```bash
+mosquitto -c /etc/mosquitto/mosquitto.conf -d
+sleep 3
+pgrep mosquitto && echo "Mosquitto started"
+```
+
+You should see a process ID and "Mosquitto started".
+
+If it doesn't start cleanly, run it in foreground to see the error:
+```bash
+mosquitto -c /etc/mosquitto/mosquitto.conf
+```
+And send me what it prints.
+
+## Step 5 — Start Z2M in the foreground first
+
+We start in foreground so we can see immediately if it crashes (INVALID_STATE etc.):
+
+```bash
+cd /opt/zigbee2mqtt
+npm start
+```
+
+Watch the log scroll. You're looking for:
+
+**Success markers:**
+```
+info: zh:ember: ======== EZSP started ========
+info: zh:ember: [STACK STATUS] Network up.
+info: z2m: zigbee-herdsman started (resumed)
+info: z2m: Connected to MQTT server
+info: z2m: Started Zigbee2MQTT
+```
+
+If you see "Started Zigbee2MQTT" — Z2M is running. **Don't Ctrl+C.** Continue to Step 6.
+
+**Failure markers:**
+- `INVALID_STATE` → SLZB-06 needs reboot again, repeat Step 2 with a longer wait
+- `MQTT failed to connect` → Mosquitto issue, redo Step 4
+- Anything else → screenshot and send
+
+## Step 6 — Verify the frontend works
+
+While Z2M runs in foreground, open `http://192.168.1.125:8080` in a browser. The dashboard should load.
+
+If it loads → Z2M is fully working. Continue to Step 7.
+
+## Step 7 — Move Z2M to background so it survives Termux closing
+
+In the Termux session running Z2M, press **Ctrl+C** to stop it. Then:
+
+```bash
+nohup npm start > /tmp/z2m.log 2>&1 &
+disown
+```
+
+(You should still be inside Debian and in `/opt/zigbee2mqtt` from Step 5.)
+
+Verify it's running:
+
+```bash
+sleep 30
+pgrep -f "node.*index" && echo "Z2M backgrounded successfully"
+```
+
+Should see a PID and "Z2M backgrounded successfully".
+
+Reload `http://192.168.1.125:8080` in browser — should still work.
+
+## Step 8 — Exit Debian
+
+```bash
+exit
+```
+
+You're back in regular Termux. Z2M and Mosquitto keep running because they were properly backgrounded.
+
+---
+
+Start with Step 1 — send me what's running. Don't go further until I see the output and confirm. If Mosquitto is dead, we'll handle that before touching Z2M.
