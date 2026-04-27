@@ -1,87 +1,63 @@
-Yes — and this is the right link to be looking at. Let me check what it actually says, because the HA docs change occasionally:Good — and this is genuinely useful. The HA docs are pointing at exactly the issue we've been chasing. Let me explain.
+Found it — the actual error. This is a real, fixable problem.
 
-## What the troubleshooting note says
+## What the error says
 
-The actual paragraph is:
-
-> "When you're creating automations using the GUI and they don't appear in the UI, make sure that you add back `automation: !include automations.yaml` from the default configuration to your `configuration.yaml`."
-
-## What this means in plain English
-
-When HA creates a default install, its `configuration.yaml` file contains a line that tells HA: "load all automations from a separate file called `automations.yaml`." That line is:
-
-```yaml
-automation: !include automations.yaml
+```
+Error loading /data/data/com.termux/files/home/hass-config/configuration.yaml:
+in "/data/data/com.termux/files/home/hass-config/configuration.yaml", line 11, column 9:
+Unable to read file /data/data/com.termux/files/home/hass-config/scripts.yaml
 ```
 
-If that line is missing from `configuration.yaml`, here's what happens:
+Translated: line 11 of your `configuration.yaml` says "load `scripts.yaml`" — but **`scripts.yaml` doesn't exist** on disk. HA refuses to load *any* config when one referenced file is missing, including all your automations. That's why the automations never appear in the UI even though `automations.yaml` is fine.
 
-1. You use the GUI to create an automation
-2. HA writes the YAML to `automations.yaml`
-3. But `configuration.yaml` doesn't tell HA to read `automations.yaml`
-4. So the automation file exists on disk, but HA never loads it
-5. The GUI shows a "timeout" because it's waiting for HA to confirm the new automation is active — but HA never even reads the file
+This was almost certainly caused by the earlier troubleshooting suggestion to add three include lines (`automation:`, `script:`, `scene:`) — but the matching files were never created.
 
-**That matches your symptoms exactly.** Editor saves, dialog times out, automation never appears in the list.
-
-## Why this might apply to you
-
-The mayukh4 setup script generates a *minimal* `configuration.yaml` — it doesn't include the standard default contents. I remember from when I first read the script: it writes a configuration with `server_host: 0.0.0.0` for network access, but it almost certainly omitted the `automation:`, `script:`, and `scene:` include lines. So GUI-created automations have nowhere to land.
-
-## How to verify this is the issue
+## The fix — create the missing files
 
 In Termux (regular Termux, `~ $` prompt):
 
 ```bash
-cat ~/hass-config/configuration.yaml
+echo "[]" > ~/hass-config/scripts.yaml
+echo "[]" > ~/hass-config/scenes.yaml
 ```
 
-Send me what's in that file. I expect to see something like:
+The `[]` is YAML for "empty list" — meaning no scripts and no scenes are defined yet, but the files exist for HA to read. This satisfies the include statements without adding any actual content.
 
-```yaml
-default_config:
-http:
-  server_host: 0.0.0.0
-```
-
-If it does NOT contain a line `automation: !include automations.yaml`, that's exactly the problem the docs describe.
-
-## How to fix it
-
-Once we confirm the missing line, the fix is a one-line edit to that file plus an HA restart. Specifically:
+Verify the files exist now:
 
 ```bash
-nano ~/hass-config/configuration.yaml
+ls -la ~/hass-config/*.yaml
 ```
 
-Add these three lines anywhere (typically at the bottom):
+You should see at least: `automations.yaml`, `configuration.yaml`, `scenes.yaml`, `scripts.yaml`.
 
-```yaml
-automation: !include automations.yaml
-script: !include scripts.yaml
-scene: !include scenes.yaml
-```
+## Re-run the configuration check
 
-Save (Ctrl+O, Enter, Ctrl+X), then restart HA:
+Back in the HA web UI:
 
-```bash
-pkill -f homeassistant
-sleep 3
-bash ~/start-homeassistant.sh
-```
+1. **Settings → System → Restart** (or wherever the "Check and restart" panel was)
+2. Click **Check configuration** again
 
-After HA comes back up (90 seconds or so), your automation editor should save properly, and the automation you've already tried to create might even already be in `automations.yaml` — meaning it'll show up immediately after the restart.
+This time it should say **"Configuration valid!"** in green.
 
-## What to do now
+## Then restart HA
 
-Run `cat ~/hass-config/configuration.yaml` and send me the output. We'll confirm whether this is the cause before changing anything. I'd much rather verify than blindly add lines and then debug something else.
+1. Click **Restart** (the button next to Check configuration — it'll now be active since config is valid)
+2. Wait 60–90 seconds. The browser may show a "Lost connection" message during the restart — that's normal.
+3. The page reconnects automatically when HA is back
 
-Also worth checking while we're there:
+## After the restart
 
-```bash
-cat ~/hass-config/automations.yaml
-```
+Go to **Settings → Automations & scenes**. All your "failed" automations should now appear in the list — they were never broken, HA was just refusing to load anything because of the missing scripts.yaml.
 
-If that file exists and contains your `Water detected at the Kitchen` automation YAML — perfect, it just needs the `configuration.yaml` fix and a restart. If the file is empty or missing, we'll create the automation manually.
+Then:
+1. Identify duplicates (you probably have 3–5 copies of the water leak automation)
+2. Delete all but one
+3. Click into the surviving one → ⋮ menu → **Run**
+4. Check your MI 8 for the notification
 
-Send me both file contents.
+---
+
+This is genuinely the cause of all the timeout dialogs. The editor was saving fine, but HA couldn't load the saved automations because of the broken include reference, so the editor's "wait for it to be active" check kept failing. Once you fix the missing files and restart, everything should snap into place.
+
+Run the two `echo` commands and the restart sequence, then tell me what's in the automations list.
