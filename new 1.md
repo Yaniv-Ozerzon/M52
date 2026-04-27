@@ -1,106 +1,70 @@
-All three files exist with `-rwx` permissions. Sizes look right (1895, 484, 1290 bytes). You're good.
+Mostly good news, but one issue worth fixing. Let me read the screenshot carefully.
 
-Now we test before any reboot.
+## What works ✓
 
-## Step 4 — Test the helper script first (safest test)
-
-This script just probes the SLZB-06 — it changes nothing. Quick sanity check:
-
-```bash
-bash ~/wait-slzb-ready.sh
+**Single watchdog running:**
 ```
-
-**Expected output:** `SLZB-06 ready after 1s` (or any number from 1 to 90).
-
-If you see "SLZB-06 ready" → great, the helper works. Continue.
-If you see "SLZB-06 not reachable after 90s" → the SLZB-06 isn't reachable from Termux. Stop and tell me.
-
-## Step 5 — Test the watchdog (safe — does nothing if everything's running)
-
-Start the watchdog manually. Right now Mosquitto, Z2M, and HA are all running, so the watchdog should simply log "started" and then go quiet.
-
-```bash
-nohup bash ~/watchdog-loop.sh > ~/watchdog-loop-stdout.log 2>&1 &
-disown
-```
-
-Wait 5 seconds, then check the log:
-
-```bash
-cat ~/watchdog.log
-```
-
-**Expected output:** one line like `[2026-04-27 09:50:00] Watchdog loop started`. Nothing else, because all services are alive.
-
-Verify it's actually running in the background:
-
-```bash
 ps aux | grep watchdog-loop | grep -v grep
+u0_a166  9944  ...  bash /data/data/com.termux/files/home/watchdog-loop.sh
+```
+Just one — clean.
+
+**Watchdog detected Mosquitto crashes:**
+```
+[2026-04-27 09:54:37] Mosquitto DOWN - restarting
+[2026-04-27 09:57:18] Mosquitto DOWN - restarting
+```
+After you killed Mosquitto, the watchdog noticed and tried to restart it. Twice — meaning the first restart didn't stick, but the watchdog kept trying. ✓
+
+## What's NOT working ✗
+
+The critical line:
+```
+$ proot-distro login ubuntu -- pgrep mosquitto
+$ proot-distro login ubuntu -- pgrep mosquitto
+$
 ```
 
-**Expected:** one line showing the watchdog-loop.sh process.
+Both `pgrep` commands returned nothing. That means **Mosquitto is currently dead** even though the watchdog tried to restart it twice.
 
-## Step 6 — Verify watchdog actually works (the meaningful test)
+Look at the timestamps:
+- 09:54:37 → watchdog tried to restart (failed)
+- 09:57:18 → watchdog tried again (also failed)
+- ~10:00 (now) → still dead
 
-Now we deliberately kill Mosquitto and watch the watchdog catch it. The next watchdog cycle is up to 5 minutes away, so we need to wait OR we run it manually for an immediate test.
+The watchdog's restart command isn't working for some reason.
 
-**Option A — patient (waits ~5 min):**
+## Why this is happening — likely cause
+
+Look at the `mosquitto -d` (daemon) command. Inside proot, when Mosquitto starts as a daemon, it forks itself and the parent exits. But sometimes the daemon doesn't get cleaned up properly when killed — it can leave its PID file behind, and a new Mosquitto refuses to start because it thinks one is already running.
+
+## Step 1 — Confirm Mosquitto is really dead
 
 ```bash
-proot-distro login ubuntu -- pkill mosquitto
+proot-distro login ubuntu -- bash -c "ps aux | grep mosquitto | grep -v grep"
 ```
 
-Then wait up to 5 minutes. Eventually:
+If empty → confirms it's dead.
+
+## Step 2 — Try to start Mosquitto manually with verbose output
 
 ```bash
-cat ~/watchdog.log
+proot-distro login ubuntu -- bash -c "mosquitto -c /etc/mosquitto/mosquitto.conf"
 ```
 
-You should see a new line like `[timestamp] Mosquitto DOWN - restarting`. And:
+Note: **no `-d`** this time. Run in foreground so we see any errors. It should print startup messages and either:
+- Hang waiting for connections (good — means it's running) → press Ctrl+C
+- Print an error and exit (bad — that's our clue)
 
-```bash
-proot-distro login ubuntu -- pgrep mosquitto
-```
+Send me what it prints. The error will tell us exactly why the daemon-mode start is failing.
 
-Should show a process ID — Mosquitto is back.
+## My honest concern
 
-**Option B — quick (runs once now):**
+If Mosquitto won't start cleanly even manually, the watchdog is doing its job (detecting and trying to recover) but the recovery command itself is broken. We'd need to fix the recovery command in the watchdog.
 
-The current watchdog is in a `while sleep 300` loop, so we can't easily ask it to run "now". Instead, run a one-shot version manually to verify the logic:
+Common possibilities:
+1. Stale PID file blocking restart (`/var/run/mosquitto.pid` exists but no process)
+2. Port 1883 still bound by a zombie process
+3. Permissions issue with the password file after Mosquitto's user changed
 
-```bash
-proot-distro login ubuntu -- pkill mosquitto
-
-# Verify it's dead
-proot-distro login ubuntu -- pgrep mosquitto || echo "DEAD"
-
-# Manually trigger one watchdog cycle
-proot-distro login ubuntu -- bash -c 'mosquitto -c /etc/mosquitto/mosquitto.conf -d'
-
-# Verify it's back
-sleep 3
-proot-distro login ubuntu -- pgrep mosquitto && echo "BACK"
-```
-
-This proves the manual restart command works. The watchdog uses the same command, so if this works, the watchdog logic works too.
-
-I recommend **Option A** — it's the realistic test. Just verify in 5 minutes.
-
-## Don't reboot yet
-
-After Step 6 confirms the watchdog catches and recovers a dead service, we'll have proven:
-- Helper script works ✓
-- Watchdog runs ✓
-- Watchdog detects and recovers crashes ✓
-
-What we *haven't* tested yet is the **full boot script flow at boot time** — but we can simulate that without rebooting. That's Step 7.
-
----
-
-Run Steps 4 and 5 first. Send me the outputs of:
-
-1. `bash ~/wait-slzb-ready.sh`
-2. `cat ~/watchdog.log`
-3. `ps aux | grep watchdog-loop | grep -v grep`
-
-If those all look good, do Step 6 Option A and wait 5 minutes for the watchdog to catch the killed Mosquitto.
+Run Step 2 and send me the foreground output. We'll see the real reason in the next 30 seconds.
