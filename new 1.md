@@ -1,107 +1,285 @@
-Looking at the screenshots, I can decode what happened. Both contain real information.
+Good call. Let's make this resilient.
 
-## Image 1 — what the Termux output tells us
+Two pieces:
 
-You ran the right commands. Reading carefully:
+1. **Robust boot script** — replaces the existing one with proper `nohup`/`disown` for both services
+2. **Watchdog** — checks every 5 minutes whether Mosquitto, Z2M, and HA are alive; restarts whatever's dead
 
-```
-ps aux | grep mosquitto | grep -v grep
-[empty - mosquitto NOT running]
-
-mosquitto -c /etc/mosquitto/mosquitto.conf -d
-[no error - started]
-
-ps aux | grep mosquitto | grep -v grep
-u0_a166  5018  0.3  0.0  15228  2392  S<s  ...  mosquitto -c /etc/mosquitto/mosquitto.conf -d
-[mosquitto IS now running ✓]
-
-mosquitto_pub -h localhost -u ozerzon -P 'Passmein@1' -t test -m hello && echo OK || echo FAILED
-OK ✓
-
-info: z2m: Connected to MQTT server
-info: z2m: ... (normal operation messages)
-bash: info:: command not found
-bash: syntax error near unexpected token '('
-```
-
-So:
-- Mosquitto was dead → you started it ✓
-- Auth test passed ✓
-- **Z2M reconnected to MQTT** — that's the line `info: z2m: Connected to MQTT server`
-
-The two error lines at the bottom (`info:: command not found` and `syntax error near...`) are because you accidentally typed Z2M's expected log lines as if they were shell commands. Harmless — bash just complained about not knowing how to run them. Z2M itself is fine; the connect happened in its own log, not in your terminal.
-
-## Image 2 — Z2M frontend can't be reached
-
-`192.168.1.125:8080` refused to connect. This is **a separate problem** — Z2M may have died or is restarting.
-
-## What likely happened
-
-The Z2M process I helped you start way back in our conversation was running in a foreground Termux session. If that session got killed (Termux closed, OS reclaimed it, you opened too many sessions and one was dropped), Z2M dies with it. Mosquitto we started as a daemon (`-d` flag), so it stays in the background. Z2M was running in the foreground.
-
-The "Connected to MQTT server" log line you saw was from a Z2M instance that no longer exists — it was the last gasp before whatever killed it took it down, OR it's an old log line scrolled into view.
-
-## Step 1 — Check if Z2M is actually running
-
-Inside the Debian container:
-
-```bash
-ps aux | grep -E "node|zigbee" | grep -v grep
-```
-
-**Expected:** one or two lines mentioning `node index.js` or `zigbee2mqtt`.
-
-**If empty** → Z2M is dead and we need to restart it.
-
-## Step 2 — Restart Z2M
-
-If dead, restart it. From inside Debian (`root@localhost:~#` prompt):
-
-```bash
-cd /opt/zigbee2mqtt
-nohup npm start > /tmp/z2m.log 2>&1 &
-disown
-```
-
-What this does:
-- `nohup` — keeps it running even if Termux session closes
-- `> /tmp/z2m.log 2>&1` — redirects all output to a log file (so it doesn't fill your terminal)
-- `&` — runs in background
-- `disown` — detaches it from the shell so it survives shell exit
-
-Wait 30 seconds for Z2M to start up.
-
-## Step 3 — Verify Z2M started
-
-```bash
-ps aux | grep "node index.js" | grep -v grep
-```
-
-You should see a `node index.js` process.
-
-Also tail its log:
-
-```bash
-tail -20 /tmp/z2m.log
-```
-
-Look for `Started Zigbee2MQTT` near the end.
-
-## Step 4 — Verify the frontend works
-
-In your browser, refresh `http://192.168.1.125:8080`. The Z2M dashboard should now load.
-
-## Step 5 — Wake the sensor
-
-Once Z2M is up, touch a wet finger to the sensor's contacts. Watch the Z2M log on the frontend's Logs page — you should see a publish message. Then check HA — the sensor should change from "Unavailable" to "Wet" then "Dry" within seconds.
+We'll also clean up the running mess first so we're starting from a known state.
 
 ---
 
-## Honest concern about this pattern
+## Part 1 — Stop everything cleanly
 
-This is the second time Mosquitto and/or Z2M have died unexpectedly. Two failures in one session points to a real problem with how they're being kept alive. Once we get this stable, we should:
+In **regular Termux** (not inside Debian — `~ $` prompt):
 
-1. **Look at your boot script** — verify it actually launches both services using `nohup` correctly so they survive Termux being closed
-2. **Add a watchdog** — a small script that checks every 5 minutes whether Mosquitto and Z2M are alive, and restarts them if not. This is what production servers do, and on a phone it's especially valuable.
+```bash
+pkill -f homeassistant
+pkill -f "node index.js"
+proot-distro login ubuntu -- pkill -f mosquitto
+sleep 3
+```
 
-But first — get them running again. Do Steps 1–5 and tell me what you see in Step 3 (`ps aux` output and `tail` of the log).
+Verify everything's dead:
+
+```bash
+ps aux | grep -E "homeassistant|node index|mosquitto" | grep -v grep
+```
+
+Output should be empty. If not, run the `pkill` commands again.
+
+---
+
+## Part 2 — Replace the boot script
+
+```bash
+nano ~/.termux/boot/start-smarthome.sh
+```
+
+Delete everything (`Ctrl+K` repeatedly to clear lines), paste this:
+
+```bash
+#!/data/data/com.termux/files/usr/bin/bash
+# Smart-home boot script — starts Mosquitto, Z2M, and HA
+
+termux-wake-lock
+
+LOGFILE=~/boot-startup.log
+echo "=== Boot startup at $(date) ===" > "$LOGFILE"
+
+# Wait for system + network
+sleep 45
+echo "Network wait done at $(date)" >> "$LOGFILE"
+
+# --- Start Mosquitto inside Debian (as a daemon - survives shell exit) ---
+echo "Starting Mosquitto..." >> "$LOGFILE"
+proot-distro login ubuntu -- bash -c '
+  pgrep mosquitto >/dev/null 2>&1 || mosquitto -c /etc/mosquitto/mosquitto.conf -d
+' >> "$LOGFILE" 2>&1
+
+sleep 5
+
+# --- Start Zigbee2MQTT inside Debian (as a backgrounded long-running process) ---
+echo "Starting Zigbee2MQTT..." >> "$LOGFILE"
+nohup proot-distro login ubuntu -- bash -c '
+  cd /opt/zigbee2mqtt
+  exec npm start
+' > ~/z2m-boot.log 2>&1 &
+disown
+
+# Wait for Z2M to come up before HA tries to connect
+sleep 60
+echo "Z2M startup window done at $(date)" >> "$LOGFILE"
+
+# --- Start Home Assistant ---
+echo "Starting Home Assistant..." >> "$LOGFILE"
+nohup bash ~/start-homeassistant.sh > ~/hass-boot.log 2>&1 &
+disown
+
+echo "=== Boot script finished at $(date) ===" >> "$LOGFILE"
+```
+
+Save: `Ctrl+O`, Enter, `Ctrl+X`. Make sure it's executable:
+
+```bash
+chmod +x ~/.termux/boot/start-smarthome.sh
+```
+
+What changed from before:
+- **Mosquitto runs as a daemon** (the `-d` flag) — survives shell exit naturally
+- **Z2M runs as a `nohup` background process with `disown`** — properly orphaned from the parent shell, survives Termux session close
+- **HA same treatment** (`nohup ... &; disown`)
+- The `exec` inside the inner bash makes Node replace bash, so the proot session stays alive holding only the Node process — no stray shells
+
+---
+
+## Part 3 — Create the watchdog script
+
+```bash
+nano ~/watchdog.sh
+```
+
+Paste:
+
+```bash
+#!/data/data/com.termux/files/usr/bin/bash
+# Watchdog - checks Mosquitto, Z2M, and HA every run; restarts dead services
+# Schedule this to run every 5 minutes via Termux:Boot or cron
+
+LOGFILE=~/watchdog.log
+NOW=$(date '+%Y-%m-%d %H:%M:%S')
+
+log() {
+  echo "[$NOW] $1" >> "$LOGFILE"
+}
+
+# --- Check Mosquitto ---
+if proot-distro login ubuntu -- pgrep mosquitto >/dev/null 2>&1; then
+  : # alive, do nothing
+else
+  log "Mosquitto DOWN - restarting"
+  proot-distro login ubuntu -- bash -c 'mosquitto -c /etc/mosquitto/mosquitto.conf -d' >> "$LOGFILE" 2>&1
+  sleep 5
+fi
+
+# --- Check Zigbee2MQTT ---
+if proot-distro login ubuntu -- pgrep -f "node.*index.js" >/dev/null 2>&1; then
+  : # alive
+else
+  log "Zigbee2MQTT DOWN - restarting"
+  nohup proot-distro login ubuntu -- bash -c '
+    cd /opt/zigbee2mqtt
+    exec npm start
+  ' > ~/z2m-watchdog.log 2>&1 &
+  disown
+  sleep 30
+fi
+
+# --- Check Home Assistant ---
+if pgrep -f "homeassistant" >/dev/null 2>&1; then
+  : # alive
+else
+  log "Home Assistant DOWN - restarting"
+  nohup bash ~/start-homeassistant.sh > ~/hass-watchdog.log 2>&1 &
+  disown
+  sleep 30
+fi
+
+# --- Optional: trim watchdog log if it grows too large ---
+if [ -f "$LOGFILE" ] && [ $(wc -l < "$LOGFILE") -gt 1000 ]; then
+  tail -500 "$LOGFILE" > "$LOGFILE.tmp" && mv "$LOGFILE.tmp" "$LOGFILE"
+fi
+```
+
+Save: `Ctrl+O`, Enter, `Ctrl+X`. Make executable:
+
+```bash
+chmod +x ~/watchdog.sh
+```
+
+---
+
+## Part 4 — Schedule the watchdog
+
+Termux doesn't have traditional `cron`, so we'll use `termux-job-scheduler` (built into Termux:API) for reliable periodic execution. First check if you have it:
+
+```bash
+which termux-job-scheduler
+```
+
+If it returns a path → you have it. If it returns "not found":
+
+```bash
+pkg install termux-api -y
+```
+
+You'll also need the **Termux:API** Android app from F-Droid (separate from Termux itself, like Termux:Boot was). Open F-Droid, search "Termux:API", install. Open it once.
+
+Then schedule the watchdog every 5 minutes:
+
+```bash
+termux-job-scheduler --period-ms 300000 --persisted true --script ~/watchdog.sh
+```
+
+Breakdown:
+- `--period-ms 300000` = run every 5 minutes (300,000 ms)
+- `--persisted true` = survives reboots
+- `--script ~/watchdog.sh` = what to run
+
+Verify the job is scheduled:
+
+```bash
+termux-job-scheduler --pending
+```
+
+You should see one pending job pointing to watchdog.sh.
+
+---
+
+## Part 5 — Test the boot script manually first
+
+Don't reboot yet. Run the boot script directly and watch what happens:
+
+```bash
+bash ~/.termux/boot/start-smarthome.sh
+```
+
+It returns to the prompt within ~2 minutes (plus the sleep timers). Wait an extra 60 seconds, then verify:
+
+```bash
+echo "=== boot-startup.log ===" && cat ~/boot-startup.log
+echo ""
+echo "=== Processes ==="
+proot-distro login ubuntu -- bash -c "ps aux | grep -E 'mosquitto|node index' | grep -v grep"
+ps aux | grep -i homeassistant | grep -v grep | head -3
+```
+
+Expected output:
+- `boot-startup.log` shows all 4 timestamped messages
+- Inside Debian: one mosquitto process + one node process
+- In Termux: HA's Python process
+
+From your PC: load `http://192.168.1.125:8123` and `http://192.168.1.125:8080`. Both should work.
+
+---
+
+## Part 6 — Test the watchdog
+
+While everything's running, manually kill Mosquitto to simulate a crash:
+
+```bash
+proot-distro login ubuntu -- pkill mosquitto
+```
+
+Then run the watchdog manually (don't wait 5 minutes):
+
+```bash
+bash ~/watchdog.sh
+```
+
+Check the log:
+
+```bash
+cat ~/watchdog.log
+```
+
+You should see a line: `[timestamp] Mosquitto DOWN - restarting`. Verify Mosquitto came back:
+
+```bash
+proot-distro login ubuntu -- pgrep mosquitto
+```
+
+Should return a process ID.
+
+If that works → the watchdog correctly detects and recovers a dead service.
+
+---
+
+## Part 7 — The reboot test
+
+Only after Parts 5 and 6 pass:
+
+1. **Settings → Power → Restart** the phone
+2. Wait **3 minutes** after the lock screen
+3. From PC, load `http://192.168.1.125:8123` and `http://192.168.1.125:8080`
+4. If both work → auto-start with watchdog is fully operational
+
+---
+
+## Honest reality of this setup
+
+With these two scripts:
+
+- **Boot script** handles cold start
+- **Watchdog** handles services dying mid-flight
+- Together: ~95–99% uptime in practice
+
+What this still doesn't protect against:
+- Phone reboots due to Android OS issues (rare on LineageOS)
+- Network outages (HA loads but devices unreachable)
+- The phone running out of storage (rare on a hub-only device)
+- termux-job-scheduler itself being killed by Android (uncommon but possible — set Termux to Unrestricted in battery settings if you haven't already)
+
+If you ever notice the watchdog *itself* not running, you can run it manually any time with `bash ~/watchdog.sh`. And `cat ~/watchdog.log` shows you a history of every restart it's done — so you'll know which service is unstable.
+
+Run Part 1 (stop everything) and Part 5 (manual boot test) first. Send me the output of Part 5's three diagnostic commands. If they look good, do Part 6 to verify watchdog works. If both pass, we're done.
